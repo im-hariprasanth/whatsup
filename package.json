@@ -1,0 +1,16 @@
+{
+  "name": "clinic-receptionist",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Multi-tenant WhatsApp AI receptionist for clinics, built on Cloudflare Workers.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "onboard": "node scripts/onboard-tenant.js",
+    "d1:migrate:local": "wrangler d1 execute CRM_DB --local --file=./schema/d1-schema.sql",
+    "d1:migrate:remote": "wrangler d1 execute CRM_DB --remote --file=./schema/d1-schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}

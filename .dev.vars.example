@@ -1,0 +1,6 @@
+# Copy this file to .dev.vars for local `wrangler dev` runs.
+# .dev.vars is gitignored — never commit real secrets.
+# In production these are set with `wrangler secret put <NAME>` instead.
+
+GROQ_API_KEY=your_groq_api_key_here
+VERIFY_TOKEN=choose_any_shared_secret_string

@@ -1,0 +1,19 @@
+name = "clinic-receptionist"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# One Worker serves every clinic. Tenant identity is resolved at request time
+# from the incoming webhook's phone_number_id — no per-tenant deploys.
+
+kv_namespaces = [
+  { binding = "TENANTS", id = "REPLACE_WITH_TENANTS_NAMESPACE_ID" },
+  { binding = "HISTORY", id = "REPLACE_WITH_HISTORY_NAMESPACE_ID" }
+]
+
+d1_databases = [
+  { binding = "CRM_DB", database_name = "clinic-receptionist-crm", database_id = "REPLACE_WITH_D1_DATABASE_ID" }
+]
+
+# Secrets (GROQ_API_KEY, VERIFY_TOKEN) are NOT set here.
+# Locally: put them in .dev.vars (see .dev.vars.example).
+# In production: `wrangler secret put GROQ_API_KEY` / `wrangler secret put VERIFY_TOKEN`.
