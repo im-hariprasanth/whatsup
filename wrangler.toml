@@ -6,12 +6,12 @@ compatibility_date = "2024-11-01"
 # from the incoming webhook's phone_number_id — no per-tenant deploys.
 
 kv_namespaces = [
-  { binding = "TENANTS", id = "REPLACE_WITH_TENANTS_NAMESPACE_ID" },
-  { binding = "HISTORY", id = "REPLACE_WITH_HISTORY_NAMESPACE_ID" }
+  { binding = "TENANTS", id = "8d4c93e2aa9e4c7fa2da478c3c0eaf6f" },
+  { binding = "HISTORY", id = "1e0fec46c15b404fb749f1a2da4c597e" }
 ]
 
 d1_databases = [
-  { binding = "CRM_DB", database_name = "clinic-receptionist-crm", database_id = "REPLACE_WITH_D1_DATABASE_ID" }
+  { binding = "CRM_DB", database_name = "clinic-receptionist-crm", database_id = "b8c18990-1d9a-4a55-bddf-1dd1b06d9d9c" }
 ]
 
 # Secrets (GROQ_API_KEY, VERIFY_TOKEN) are NOT set here.

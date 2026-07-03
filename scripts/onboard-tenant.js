@@ -102,8 +102,10 @@ function main() {
   );
   fs.writeFileSync(tmpFile, JSON.stringify(tenantValue), 'utf8');
 
-  const scopeFlag = args.local ? '--local' : '--remote';
-  const command = `npx wrangler kv key put --binding=TENANTS "${phoneNumberId}" --path "${tmpFile}" ${scopeFlag}`;
+  // wrangler's kv commands are remote by default; --local opts into the
+  // local dev store. There's no explicit --remote flag on this CLI version.
+  const scopeFlag = args.local ? '--local' : '';
+  const command = `npx wrangler kv key put --binding=TENANTS "${phoneNumberId}" --path "${tmpFile}" ${scopeFlag}`.trim();
 
   console.log('\nTenant config (TENANTS KV value):\n');
   console.log(JSON.stringify(tenantValue, null, 2));
