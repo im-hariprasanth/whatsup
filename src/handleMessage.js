@@ -54,13 +54,13 @@ export async function handleMessage(payload, env) {
 
   // finalReply starts as the AI's own reply (which already assumed success);
   // resolveBooking only overrides it when reality disagrees (out of hours,
-  // calendar not connected, or — once Phase 6 lands — a genuine conflict).
+  // calendar not connected, or a genuine conflict).
   let finalReply = reply;
   let bookingResult = { confirmed: false, crmSlot: null };
 
   if (bookingRequest) {
     console.log(`[booking:request] ${historyKey}`, JSON.stringify(bookingRequest));
-    bookingResult = await resolveBooking({ tenant, bookingRequest, env });
+    bookingResult = await resolveBooking({ tenant, bookingRequest, patientPhone, env });
     if (bookingResult.replyOverride) {
       finalReply = bookingResult.replyOverride;
     }
