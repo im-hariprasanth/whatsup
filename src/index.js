@@ -1,8 +1,19 @@
 import { handleMessage } from './handleMessage.js';
+import { handleOAuthStart, handleOAuthCallback } from './handleOAuth.js';
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    // Narrow, path-specific routes checked first; everything else falls
+    // through to the method-only Meta webhook handling at "/" below
+    // (unchanged -- still what's registered in Meta's dashboard).
+    if (request.method === 'GET' && url.pathname === '/oauth/google/start') {
+      return handleOAuthStart(request, env);
+    }
+    if (request.method === 'GET' && url.pathname === '/oauth/google/callback') {
+      return handleOAuthCallback(request, env);
+    }
 
     if (request.method === 'GET') {
       // Meta webhook verification handshake.

@@ -4,3 +4,8 @@
 
 GROQ_API_KEY=your_groq_api_key_here
 VERIFY_TOKEN=choose_any_shared_secret_string
+
+# Google Calendar booking (see README "Google Calendar setup" section)
+GOOGLE_CLIENT_ID=your_google_oauth_client_id
+GOOGLE_CLIENT_SECRET=your_google_oauth_client_secret
+OAUTH_SETUP_TOKEN=choose_any_shared_secret_string
