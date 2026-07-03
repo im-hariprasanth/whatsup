@@ -108,6 +108,13 @@ function main() {
     process.exit(1);
   }
 
+  if (config.specialty !== undefined) {
+    if (!Array.isArray(config.specialty) || config.specialty.some((s) => typeof s !== 'string')) {
+      console.error('`specialty` must be an array of strings, e.g. ["Dermatology", "Hair Care"].');
+      process.exit(1);
+    }
+  }
+
   if (config.treatments !== undefined) {
     if (!Array.isArray(config.treatments)) {
       console.error('`treatments` must be an array.');

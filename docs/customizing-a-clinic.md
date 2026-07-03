@@ -16,30 +16,45 @@ bookings against actual Google Calendar availability, enforcing the clinic's rea
 business hours along the way. **Everything clinic-specific lives in one JSON config
 per clinic. Onboarding a new clinic never touches code or requires a redeploy.**
 
-## The four things that make responses *specific* instead of generic
+## The five things that make responses *specific* instead of generic
 
 These are the fields that actually get read out loud to the model on every message.
 Fill these in carefully — they're the difference between "we offer various treatments"
 and "hair straightening starts at ₹800 and takes about an hour."
 
-### 1. `personaPrompt` — identity, tone, and specialty
+### 1. `personaPrompt` — identity and tone
 
-Free text. This is where you tell the model *what kind of clinic this is* — its
-specialty, its city, its general vibe. Keep it short; it's read on every single message
-alongside everything else below, and this model (8B parameters) gets less reliable the
-longer and more cluttered its instructions get.
+Free text. This is where you tell the model *who* it is — clinic name, city, general
+vibe. Keep it short; it's read on every single message alongside everything else below,
+and this model (8B parameters) gets less reliable the longer and more cluttered its
+instructions get.
 
 ```
-"You are the receptionist at Bonitaa Skin and Hair Care clinic in Coimbatore,
-specializing in dermatology and hair treatments. Answer patient questions about
-treatments, pricing, and appointments warmly and briefly."
+"You are the receptionist at Bonitaa Skin and Hair Care clinic in Coimbatore. Answer
+patient questions about treatments, pricing, and appointments warmly and briefly."
 ```
 
-Don't put pricing or hours here — those belong in the structured fields below, where
-the code guarantees they're accurate instead of hoping the model remembers prose
-correctly.
+Don't put pricing, hours, or specialty scope here — those belong in the structured
+fields below, where the code guarantees they're accurate and consistently enforced
+instead of hoping the model remembers prose correctly.
 
-### 2. `treatments` — what they offer and what it costs
+### 2. `specialty` — what the clinic actually treats (and honestly declines outside it)
+
+```json
+"specialty": ["Dermatology", "Hair Care"]
+```
+
+An array of strings. This is read into the prompt with an explicit instruction: *only
+discuss topics within this specialty, and say so honestly if a patient asks about
+something outside it, rather than guessing.* Verified live — asking Bonitaa's number
+about root canals got "No, we specialize in dermatology and hair care... I'd recommend a
+nearby clinic" instead of a hallucinated answer, while an in-specialty question still got
+an accurate, specific reply.
+
+Optional — a tenant without it just doesn't get that explicit boundary enforced (the
+model still infers scope loosely from `personaPrompt`, less reliably).
+
+### 3. `treatments` — what they offer and what it costs
 
 An array. Each entry:
 
@@ -62,7 +77,7 @@ An array. Each entry:
   treatment is named "Hair Straightening Treatment," it'll still match fine — but wildly
   different phrasing might not, so keep names close to how a patient would actually say them.
 
-### 3. `businessHours` — real slot/time enforcement, not just prompt text
+### 4. `businessHours` — real slot/time enforcement, not just prompt text
 
 ```json
 {
@@ -91,7 +106,7 @@ An array. Each entry:
 the system correctly resolve "tomorrow" or "this Saturday" into a real date, and what
 makes real Calendar bookings land at the correct local time instead of shifted by hours.
 
-### 4. `salesStyle` — optional tone nudge
+### 5. `salesStyle` — optional tone nudge
 
 One short sentence, e.g. `"Warm and concise, never pushy"` or `"Professional and
 efficient, minimal small talk"`. Layered on top of a fixed shared sales-flow instruction
@@ -104,7 +119,7 @@ Skip it if the default warm/friendly tone is fine as-is.
    API setup: a `phone_number_id` and an access token (`metaToken`). This part is manual
    — there's no automated signup flow (see README's "Out of scope").
 
-2. **Write the four fields above** into a JSON file. See the full example below.
+2. **Write the five fields above** into a JSON file. See the full example below.
 
 3. **Dry-run it:**
    ```bash
@@ -147,8 +162,9 @@ dermatology-specific:
   "clinicId": "smilecare",
   "clinicName": "SmileCare Dental Clinic",
   "metaToken": "EAA...",
-  "personaPrompt": "You are the receptionist at SmileCare Dental Clinic in Bangalore, specializing in general and cosmetic dentistry. Answer patient questions about treatments, pricing, and appointments warmly and briefly.",
+  "personaPrompt": "You are the receptionist at SmileCare Dental Clinic in Bangalore. Answer patient questions about treatments, pricing, and appointments warmly and briefly.",
   "salesStyle": "Professional and reassuring — many patients are anxious about dental visits",
+  "specialty": ["General Dentistry", "Cosmetic Dentistry"],
   "treatments": [
     { "name": "Teeth cleaning", "price": "₹1500", "durationMinutes": 30, "description": "Routine scaling and polishing" },
     { "name": "Root canal treatment", "price": "₹4000 onwards", "durationMinutes": 90, "description": "Single sitting root canal with modern equipment" },
@@ -183,38 +199,30 @@ tone — that's the whole point of the tenant model.
 
 ## Suggestions — things worth considering adding
 
-You asked me to flag anything I think is missing. In rough priority order:
+`specialty` (below) is now implemented. Remaining gaps, in rough priority order:
 
-1. **A dedicated `specialty`/category field.** Right now "specialty" lives inside free-text
-   `personaPrompt` prose, which works fine for one clinic at a time but isn't structured —
-   there's no clean way to, say, list all your clinics by specialty later, or have the
-   model reference it in a more targeted way (e.g., "as a dermatology clinic, we don't
-   handle X, but here's who might"). A small `specialty: ["dermatology", "hair care"]`
-   array, templated into the prompt the same way treatments are, would be a cheap,
-   low-risk addition if you're planning to onboard clinics across different fields.
-
-2. **Holiday/exception dates.** `businessHours` currently only supports a fixed weekly
+1. **Holiday/exception dates.** `businessHours` currently only supports a fixed weekly
    pattern — there's no way to mark "closed this Diwali" or "half-day on this specific
    date" without editing the whole weekly schedule and back. Worth adding if clinics
    regularly have one-off closures (most do).
 
-3. **Doctor/staff assignment per treatment.** If a clinic has multiple
+2. **Doctor/staff assignment per treatment.** If a clinic has multiple
    doctors/specialists and patients care which one they see, that's not captured
    anywhere right now — bookings go onto one shared calendar with no staff distinction.
 
-4. **Cancellation/rescheduling via chat.** The system can create a booking, but there's
+3. **Cancellation/rescheduling via chat.** The system can create a booking, but there's
    no path for a patient to say "actually, can we move it to Thursday" and have that
    update or cancel the existing calendar event — today that would just create a second,
    separate booking request.
 
-5. **A minimum booking notice window.** Nothing currently stops a patient from
+4. **A minimum booking notice window.** Nothing currently stops a patient from
    "confirming" an appointment 10 minutes from now that staff have no realistic way to
    prepare for.
 
-6. **Multi-location clinics.** The model is one config = one WhatsApp number = one
+5. **Multi-location clinics.** The model is one config = one WhatsApp number = one
    calendar. A clinic chain with multiple branches under one WhatsApp number isn't
    supported — you'd onboard each branch as its own "clinic" with its own number today.
 
-None of these are required to onboard your next clinic — the four fields above are
+None of these are required to onboard your next clinic — the five fields above are
 enough for accurate, specific responses today. These are just the next layer if the
 product needs to handle more complex clinic operations.

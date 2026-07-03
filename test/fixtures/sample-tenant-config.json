@@ -4,6 +4,7 @@
   "metaToken": "EAAxxxxxxxxxxxxxxxxxxxxxxxxPLACEHOLDER",
   "personaPrompt": "You are the receptionist at Bonitaa Skin and Hair Care clinic in Coimbatore. Answer patient questions about treatments, pricing, and appointments warmly and briefly.",
   "salesStyle": "Warm and concise, never pushy",
+  "specialty": ["Dermatology", "Hair Care"],
   "treatments": [
     { "name": "Hair straightening", "price": "Rs.800 onwards", "durationMinutes": 60, "description": "Smoothing treatment for frizz-free hair" },
     { "name": "Skin facial", "price": "Rs.1200 onwards", "durationMinutes": 45, "description": "Deep-cleanse and glow facial" },

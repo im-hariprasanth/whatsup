@@ -1,5 +1,16 @@
 import { SALES_FLOW_GUIDANCE, JSON_FORMAT_INSTRUCTIONS } from './formatContract.js';
 
+// Renders the tenant's specialty/category list into prompt text. Previously
+// this only ever lived inside free-text personaPrompt prose (works, but not
+// structured — no consistent way to reference it or reason about it).
+// Explicitly instructs the model to stay honest about scope, since a small
+// model asked an out-of-specialty question will otherwise happily guess.
+function formatSpecialty(specialty) {
+  if (!Array.isArray(specialty) || specialty.length === 0) return null;
+
+  return `Specialty: ${specialty.join(', ')}. Only discuss topics within this specialty. If a patient asks about something clearly outside it, say so honestly and briefly rather than guessing or inventing an answer.`;
+}
+
 // Renders the tenant's structured treatment list into prompt text, so
 // pricing/names come from validated config rather than however well the
 // clinic happened to phrase their persona prose. Returns null when the
@@ -68,6 +79,11 @@ export function buildSystemPrompt(tenant) {
 
   if (tenant.salesStyle) {
     sections.push(`Tone note for this clinic: ${tenant.salesStyle}`);
+  }
+
+  const specialtySection = formatSpecialty(tenant.specialty);
+  if (specialtySection) {
+    sections.push(specialtySection);
   }
 
   const treatmentsSection = formatTreatments(tenant.treatments);
