@@ -2,5 +2,23 @@
   "clinicId": "bonitaa",
   "clinicName": "Bonitaa Skin and Hair Care",
   "metaToken": "EAAxxxxxxxxxxxxxxxxxxxxxxxxPLACEHOLDER",
-  "personaPrompt": "You are the receptionist at Bonitaa Skin and Hair Care clinic in Coimbatore. Answer patient questions about treatments, pricing, and appointments warmly and briefly. Treatments include hair straightening (from Rs.800), skin facials (from Rs.1200), and acne treatment consultations (from Rs.500). The clinic is open Tuesday to Sunday, 10am to 7pm, and closed on Mondays."
+  "personaPrompt": "You are the receptionist at Bonitaa Skin and Hair Care clinic in Coimbatore. Answer patient questions about treatments, pricing, and appointments warmly and briefly.",
+  "salesStyle": "Warm and concise, never pushy",
+  "treatments": [
+    { "name": "Hair straightening", "price": "Rs.800 onwards", "durationMinutes": 60, "description": "Smoothing treatment for frizz-free hair" },
+    { "name": "Skin facial", "price": "Rs.1200 onwards", "durationMinutes": 45, "description": "Deep-cleanse and glow facial" },
+    { "name": "Acne treatment consultation", "price": "Rs.500", "durationMinutes": 30, "description": "Consultation with a dermatologist for acne-prone skin" }
+  ],
+  "businessHours": {
+    "timezone": "Asia/Kolkata",
+    "days": {
+      "monday": null,
+      "tuesday": { "open": "10:00", "close": "19:00" },
+      "wednesday": { "open": "10:00", "close": "19:00" },
+      "thursday": { "open": "10:00", "close": "19:00" },
+      "friday": { "open": "10:00", "close": "19:00" },
+      "saturday": { "open": "10:00", "close": "19:00" },
+      "sunday": { "open": "10:00", "close": "19:00" }
+    }
+  }
 }

@@ -92,6 +92,22 @@ function main() {
     process.exit(1);
   }
 
+  if (config.treatments !== undefined) {
+    if (!Array.isArray(config.treatments)) {
+      console.error('`treatments` must be an array.');
+      process.exit(1);
+    }
+    config.treatments.forEach((t, i) => {
+      if (!t.name || !t.price) {
+        console.error(`treatments[${i}] needs at least "name" and "price".`);
+        process.exit(1);
+      }
+      if (!t.durationMinutes) {
+        console.warn(`treatments[${i}] ("${t.name}") has no durationMinutes — booking will fall back to a default duration.`);
+      }
+    });
+  }
+
   const { phoneNumberId, ...tenantValue } = config;
 
   // Written to a temp file and passed via --path rather than inlined on the

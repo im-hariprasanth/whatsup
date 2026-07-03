@@ -1,9 +1,10 @@
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const MODEL = 'llama-3.1-8b-instant';
 
-// One Groq call does double duty: `messages` already includes the system
+// One Groq call does triple duty: `messages` already includes the system
 // prompt (tenant persona + fixed JSON contract) plus rolling history plus the
-// new user message. Returns the parsed { reply, extract } — never a second call.
+// new user message. Returns the parsed { reply, extract, bookingRequest } —
+// never a second call in the common path.
 export async function generateReply(messages, env) {
   const response = await fetch(GROQ_URL, {
     method: 'POST',
@@ -37,6 +38,7 @@ export async function generateReply(messages, env) {
 
   return {
     reply: parsed.reply,
-    extract: parsed.extract ?? null
+    extract: parsed.extract ?? null,
+    bookingRequest: parsed.booking_request ?? null
   };
 }
