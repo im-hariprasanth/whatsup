@@ -23,6 +23,18 @@ export async function saveToCRM(clinicId, phone, extract, env) {
     .run();
 }
 
+// Real lookup for status-check questions ("is my booking confirmed?") --
+// callers use this instead of letting the model narrate an answer from
+// conversation memory, which has no guarantee of matching what's actually
+// on file.
+export async function getClient(clinicId, phone, env) {
+  return env.CRM_DB.prepare(
+    'SELECT name, treatment_interest, appointment_slot, notes FROM clients WHERE clinic_id = ? AND phone = ?'
+  )
+    .bind(clinicId, phone)
+    .first();
+}
+
 // --- Alternative long-term memory backends (NOT used — kept for reference only) ---
 //
 // If a future tenant needs a spreadsheet-friendly or no-code-friendly CRM instead

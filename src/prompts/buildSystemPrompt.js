@@ -48,26 +48,36 @@ function formatBusinessHours(businessHours) {
   return `Business hours (${businessHours.timezone}):\n${lines.join('\n')}`;
 }
 
-// Injects the current date/time in the clinic's own timezone, computed fresh
-// on every call — without this the model has no real anchor for resolving
-// "tomorrow" or "this Saturday" into an actual date.
+function formatDateParts(date, timezone, opts) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: timezone, ...opts }).formatToParts(date);
+  return Object.fromEntries(parts.map((p) => [p.type, p.value]));
+}
+
+// Injects the current date/time plus an explicit next-7-days lookup table,
+// computed fresh on every call, in the clinic's own timezone. The lookup
+// table exists because asking the model to compute weekday arithmetic itself
+// ("today is Saturday, so Sunday is +1 day") turned out unreliable in
+// practice — verified live, the same phrase "2pm Sunday" resolved to two
+// different dates across two separate messages in the same conversation,
+// creating two conflicting real calendar bookings. Handing it a literal
+// table to read from removes the arithmetic entirely.
 function formatTodayContext(timezone) {
   if (!timezone) return null;
 
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    weekday: 'long',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  }).formatToParts(new Date());
+  const now = new Date();
+  const nowParts = formatDateParts(now, timezone, {
+    weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false
+  });
 
-  const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  const upcoming = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(now.getTime() + i * 86400000);
+    const dParts = formatDateParts(d, timezone, { weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit' });
+    const label = i === 0 ? `Today (${dParts.weekday})` : i === 1 ? `Tomorrow (${dParts.weekday})` : dParts.weekday;
+    upcoming.push(`${label}: ${dParts.year}-${dParts.month}-${dParts.day}`);
+  }
 
-  return `Right now it is ${map.weekday}, ${map.year}-${map.month}-${map.day}, ${map.hour}:${map.minute} clinic-local time. Use this to resolve relative dates like "tomorrow" or "this Saturday".`;
+  return `Right now it is ${nowParts.weekday}, ${nowParts.year}-${nowParts.month}-${nowParts.day}, ${nowParts.hour}:${nowParts.minute} clinic-local time.\nUpcoming dates (use this table to resolve a day name into a date — never compute it yourself; if the patient doesn't say "next", use the soonest matching date here):\n${upcoming.join('\n')}`;
 }
 
 // Composes the full Groq system prompt for a tenant. Tenant config supplies

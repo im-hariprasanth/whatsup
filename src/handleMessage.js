@@ -5,6 +5,7 @@ import { sendReply } from './lib/whatsapp.js';
 import { saveToCRM } from './lib/crm.js';
 import { claimMessage } from './lib/idempotency.js';
 import { resolveBooking } from './lib/booking.js';
+import { resolveStatusCheck } from './lib/statusCheck.js';
 import { buildSystemPrompt } from './prompts/buildSystemPrompt.js';
 
 // Orchestrates one inbound WhatsApp message end to end:
@@ -48,13 +49,15 @@ export async function handleMessage(payload, env) {
 
   console.log(`[groq:request] ${historyKey}`, JSON.stringify(messages));
 
-  const { reply, extract, bookingRequest } = await generateReply(messages, env);
+  const { reply, extract, bookingRequest, statusCheck } = await generateReply(messages, env);
 
   console.log(`[groq:response] ${historyKey} reply=${reply} extract=${JSON.stringify(extract)}`);
 
   // finalReply starts as the AI's own reply (which already assumed success);
-  // resolveBooking only overrides it when reality disagrees (out of hours,
-  // calendar not connected, or a genuine conflict).
+  // resolveBooking/resolveStatusCheck only override it when reality disagrees
+  // (out of hours, calendar not connected, a genuine conflict) or when the
+  // model's own reply was never grounded in real data to begin with (status
+  // checks are never answered by the model itself — see formatContract.js).
   let finalReply = reply;
   let bookingResult = { confirmed: false, crmSlot: null };
 
@@ -64,6 +67,10 @@ export async function handleMessage(payload, env) {
     if (bookingResult.replyOverride) {
       finalReply = bookingResult.replyOverride;
     }
+  } else if (statusCheck) {
+    console.log(`[status:check] ${historyKey}`);
+    const statusResult = await resolveStatusCheck({ tenant, patientPhone, env });
+    finalReply = statusResult.replyOverride;
   }
 
   // Send the reply. A WhatsApp send failure (e.g. an invalid/placeholder token
