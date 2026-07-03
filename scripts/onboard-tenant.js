@@ -53,6 +53,22 @@ function parseArgs(argv) {
   return args;
 }
 
+// Fetches the tenant's current KV value so onboarding can merge on top of it
+// rather than blindly overwriting -- critical once a tenant has a
+// googleCalendar connection (written exclusively by the OAuth callback,
+// never by this script), since a routine re-run to tweak pricing must not
+// silently wipe that connection. Returns {} for a brand new tenant.
+function fetchExistingTenant(phoneNumberId, local) {
+  const scopeFlag = local ? '--local' : '';
+  const command = `npx wrangler kv key get --binding=TENANTS "${phoneNumberId}" ${scopeFlag}`.trim();
+  try {
+    const raw = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    return JSON.parse(raw);
+  } catch (err) {
+    return {};
+  }
+}
+
 function loadConfig(args) {
   if (args.file) {
     const filePath = path.resolve(process.cwd(), args.file);
@@ -108,7 +124,23 @@ function main() {
     });
   }
 
-  const { phoneNumberId, ...tenantValue } = config;
+  if (config.googleCalendar !== undefined) {
+    console.warn(
+      '`googleCalendar` is managed exclusively by the OAuth callback route (/oauth/google/start) — ignoring the value in your input.'
+    );
+    delete config.googleCalendar;
+  }
+
+  const { phoneNumberId, ...incomingValue } = config;
+
+  const existing = fetchExistingTenant(phoneNumberId, args.local);
+  if (existing.googleCalendar) {
+    console.log('Preserving existing googleCalendar connection for this tenant.');
+  }
+
+  // Shallow merge: incoming fields win per top-level key, but anything not
+  // mentioned in this run (like googleCalendar) survives untouched.
+  const tenantValue = { ...existing, ...incomingValue };
 
   // Written to a temp file and passed via --path rather than inlined on the
   // command line, so quoting/escaping the JSON never breaks across shells.
