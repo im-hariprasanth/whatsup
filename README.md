@@ -9,6 +9,10 @@ The first tenant, **Bonitaa Skin and Hair Care**, is used as the reference confi
 local testing (see `test/fixtures/sample-tenant-config.json`), but nothing about it is
 hardcoded in source — all clinic-specific content lives in `TENANTS` KV data.
 
+This README covers infrastructure setup. For configuring a *specific* clinic's
+treatments, hours, and tone once the platform is running, see
+[`docs/customizing-a-clinic.md`](docs/customizing-a-clinic.md).
+
 ## How it works
 
 ```
