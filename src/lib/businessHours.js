@@ -12,6 +12,17 @@ function toMinutes(hhmm) {
   return h * 60 + m;
 }
 
+// Patient-facing time display only — the internal contract (Groq's
+// booking_request.time, business hours storage) stays 24-hour HH:MM
+// throughout the system since that's unambiguous to parse. This is purely
+// for what gets shown/said to a patient.
+export function formatTime12h(hhmm) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
 export function isWithinBusinessHours({ date, time, durationMinutes, businessHours }) {
   if (!businessHours?.days) return false;
 
@@ -37,5 +48,5 @@ export function describeHoursFor(date, businessHours) {
   const day = dayNameFor(date);
   const hours = businessHours.days[day];
   const label = day[0].toUpperCase() + day.slice(1);
-  return hours ? `${label}: ${hours.open}–${hours.close}` : `${label}: closed`;
+  return hours ? `${label}: ${formatTime12h(hours.open)}–${formatTime12h(hours.close)}` : `${label}: closed`;
 }

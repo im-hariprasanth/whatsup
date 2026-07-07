@@ -1,4 +1,4 @@
-import { isWithinBusinessHours, hoursForDay } from './businessHours.js';
+import { isWithinBusinessHours, hoursForDay, formatTime12h } from './businessHours.js';
 import { refreshAccessToken } from './googleAuth.js';
 import { checkFreeBusy, createEvent } from './googleCalendar.js';
 
@@ -10,7 +10,7 @@ const DEFAULT_DURATION_MINUTES = 30;
 function pendingFallback(date, time) {
   return {
     confirmed: false,
-    replyOverride: `Thanks — I've noted your request for ${date} at ${time}. Our team will confirm your slot shortly.`,
+    replyOverride: `Thanks — I've noted your request for ${date} at ${formatTime12h(time)}. Our team will confirm your slot shortly.`,
     crmSlot: `${date} ${time} (pending confirmation)`
   };
 }
@@ -79,7 +79,7 @@ export async function resolveBooking({ tenant, bookingRequest, patientPhone, env
     return {
       confirmed: false,
       replyOverride: hours
-        ? `Sorry, that time doesn't work — we're open ${hours.open}–${hours.close} that day. Could you pick another time?`
+        ? `Sorry, that time doesn't work — we're open ${formatTime12h(hours.open)}–${formatTime12h(hours.close)} that day. Could you pick another time?`
         : `Sorry, we're closed that day. Could you pick another day?`,
       crmSlot: null
     };
@@ -142,9 +142,10 @@ export async function resolveBooking({ tenant, bookingRequest, patientPhone, env
   }
 
   console.log(`[booking:confirmed] ${tenant.clinicId} ${date} ${time}`);
+  const treatmentLabel = matchedTreatment?.name || treatmentName || 'your appointment';
   return {
     confirmed: true,
-    replyOverride: null, // the AI's own reply already said "booked" — let it stand
+    replyOverride: `You're all set — ${treatmentLabel} is confirmed for ${date} at ${formatTime12h(time)}. Looking forward to seeing you!`,
     crmSlot: `${date} ${time}`
   };
 }

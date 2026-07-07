@@ -1,4 +1,5 @@
 import { SALES_FLOW_GUIDANCE, JSON_FORMAT_INSTRUCTIONS } from './formatContract.js';
+import { formatTime12h } from '../lib/businessHours.js';
 
 // Renders the tenant's specialty/category list into prompt text. Previously
 // this only ever lived inside free-text personaPrompt prose (works, but not
@@ -41,7 +42,7 @@ function formatBusinessHours(businessHours) {
     .map((day) => {
       const hours = businessHours.days[day];
       const label = day[0].toUpperCase() + day.slice(1);
-      return hours ? `${label}: ${hours.open}–${hours.close}` : `${label}: closed`;
+      return hours ? `${label}: ${formatTime12h(hours.open)}–${formatTime12h(hours.close)}` : `${label}: closed`;
     });
 
   if (lines.length === 0) return null;
