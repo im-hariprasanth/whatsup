@@ -1,6 +1,7 @@
 import { isWithinBusinessHours, hoursForDay, formatTime12h } from './businessHours.js';
 import { refreshAccessToken } from './googleAuth.js';
 import { checkFreeBusy, createEvent } from './googleCalendar.js';
+import { getClient } from './crm.js';
 
 const DEFAULT_DURATION_MINUTES = 30;
 
@@ -69,6 +70,18 @@ export async function resolveBooking({ tenant, bookingRequest, patientPhone, env
   const { date, time, treatment: treatmentName } = bookingRequest;
   const matchedTreatment = findTreatment(tenant.treatments, treatmentName);
   const durationMinutes = matchedTreatment?.durationMinutes ?? DEFAULT_DURATION_MINUTES;
+
+  // A small model re-reading plain-text history can re-emit the exact same
+  // booking_request on a later, unrelated turn (e.g. the patient just says
+  // "thank you") since nothing in the transcript marks it as already
+  // resolved. Without this guard that re-triggers a real calendar write,
+  // which then "conflicts" with the event it created a moment earlier and
+  // reports a false "slot was just taken" to a patient who already has it confirmed.
+  const existingClient = await getClient(tenant.clinicId, patientPhone, env);
+  if (existingClient?.appointment_slot === `${date} ${time}`) {
+    console.log(`[booking:already-confirmed] ${tenant.clinicId} ${date} ${time}`);
+    return { confirmed: true, replyOverride: null, crmSlot: existingClient.appointment_slot };
+  }
 
   if (
     tenant.businessHours &&
