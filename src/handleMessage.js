@@ -18,6 +18,21 @@ function extractNameFromReply(text) {
   return text.replace(/^(it'?s|my name is|i am|i'?m|this is)\s+/i, '').trim();
 }
 
+// Whether a booking actually gets confirmed relied entirely on the model
+// correctly judging, fresh each turn, "is this reply answering the slot I
+// just proposed?" Verified live in the same conversation that this misfires
+// often enough to matter — it recognized a plain "Yes" as a confirmation
+// twice and, on an identical "Yes!" one turn earlier, just re-asked the same
+// question instead. A short, unambiguous affirmative immediately following a
+// slot proposal has only one reasonable reading, so that common case is
+// decided here deterministically instead of leaving it to the model's
+// per-turn judgment call every single time.
+const BARE_AFFIRMATIVE = /^(ye+s+|yea+h?|yep+|yup+|sure|ok(ay)?|confirm(ed)?|book\s*it|go\s*ahead|please\s*book(\s*it)?)[.!]*$/i;
+
+function isBareAffirmative(text) {
+  return BARE_AFFIRMATIVE.test(text.trim());
+}
+
 // Orchestrates one inbound WhatsApp message end to end:
 // tenant lookup -> rolling history -> Groq -> WhatsApp reply -> history write -> CRM upsert.
 export async function handleMessage(payload, env) {
@@ -94,9 +109,17 @@ export async function handleMessage(payload, env) {
 
   console.log(`[groq:request] ${historyKey}`, JSON.stringify(messages));
 
-  const { reply, extract, proposedSlot, confirmBooking, statusCheck } = await generateReply(messages, env);
+  const { reply, extract, proposedSlot, confirmBooking: modelConfirmBooking, statusCheck } = await generateReply(messages, env);
 
   console.log(`[groq:response] ${historyKey} reply=${reply} extract=${JSON.stringify(extract)}`);
+
+  // Deterministic override: a bare "yes"/"confirm" right after a slot was
+  // proposed is unambiguous regardless of what the model decided this turn.
+  const hasActionablePending = pendingSlot && !pendingSlot.declined && !pendingSlot.awaitingName;
+  const confirmBooking = modelConfirmBooking || (hasActionablePending && isBareAffirmative(message.text.body));
+  if (!modelConfirmBooking && confirmBooking) {
+    console.log(`[booking:affirmative-override] ${historyKey}`);
+  }
 
   // finalReply starts as the AI's own reply (which already assumed success);
   // resolveBooking/resolveStatusCheck only override it when reality disagrees
