@@ -1,5 +1,12 @@
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const MODEL = 'llama-3.1-8b-instant';
+// Upgraded from llama-3.1-8b-instant — verified live that the 8B model lost
+// track of its own immediately preceding message across multiple turns
+// (re-proposing a fabricated slot instead of confirming the one it had just
+// offered, then losing the thread of the conversation entirely). The
+// deterministic guards elsewhere (pendingSlot, the name gate, never trusting
+// the model on facts) stay exactly as-is regardless of which model drafts
+// replies — this only changes reply quality/coherence, same API and key.
+const MODEL = 'llama-3.3-70b-versatile';
 
 // One Groq call does quadruple duty: `messages` already includes the system
 // prompt (tenant persona + fixed JSON contract) plus rolling history plus the
