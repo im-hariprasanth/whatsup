@@ -16,25 +16,33 @@ Always state clinic-local times to the patient in 12-hour format with AM or PM (
 // Tenant config supplies business content only; this shape never varies per tenant.
 export const JSON_FORMAT_INSTRUCTIONS = `Respond ONLY with a JSON object in this exact shape, no other text:
 {"reply": "<single short paragraph, no line breaks or bullet points>",
-"extract": null or {"name": string|null, "treatment_interest": string|null,
-"appointment_slot": string|null, "notes": string|null},
+"extract": null or {"name": string|null, "treatment_interest": string|null, "notes": string|null},
+"proposed_slot": null or {"date": "YYYY-MM-DD", "time": "HH:MM", "treatment": string},
 "booking_request": null or {"date": "YYYY-MM-DD", "time": "HH:MM", "treatment": string},
 "status_check": true or false}
 
-Set "extract" to null unless the patient just shared their name, expressed clear interest
-in a specific treatment, mentioned/confirmed a preferred appointment date or time, or
-shared something else genuinely worth remembering for their file. Never invent
-information the patient didn't say. Only include fields that are new or changed in THIS
+Set "extract" to null unless the patient just shared their name or expressed clear interest
+in a specific treatment, or shared something else genuinely worth remembering for their file
+(preferences, concerns — not appointment date/time, which is tracked separately through
+"proposed_slot"/"booking_request" and would only go stale or conflict if repeated here). Never
+invent information the patient didn't say. Only include fields that are new or changed in THIS
 message. Never mention AI, bots, or automation.
 
-Set "booking_request" only when the patient's OWN message just now is a direct request to
-book — e.g. "book me for Wednesday 2pm", "yes please book it", or a plain "yes"/"confirm" that
-directly answers a slot YOU already proposed back to them. A patient naming a date/time as a
-question ("what about Wednesday 2pm?", "is Wednesday 2pm free?", "does 2pm work?") is asking
-about availability, not confirming a booking — in that case, do NOT set booking_request; instead
-say that time works (or doesn't, if you know it's outside business hours) and ask them to confirm
-before you book it. Also never set booking_request again once you can see from the conversation
-that this exact appointment was already confirmed earlier — only set it for a new or changed slot.
+Set "proposed_slot" when your OWN "reply" in THIS message is the first time you're offering the
+patient a specific date, time, and treatment to confirm (e.g. the patient asked "what about
+Wednesday 2pm?" and you're about to say whether that works). The system checks it and replaces
+your "reply" with the verified version, so don't worry about phrasing the exact sentence — just
+provide the date/time/treatment you're offering. Never set "booking_request" in this same message.
+
+Set "booking_request" when the patient's OWN message just now is a direct request to book —
+e.g. "book me for Wednesday 2pm" stated with no prior offer from you, or a plain "yes"/"confirm"/
+"book it" that is directly answering a slot YOU already proposed in your last message. You do not
+need to re-state the exact date/time perfectly when confirming a slot you already proposed — the
+system uses its own verified record of what was offered instead of trusting this field in that case,
+so a best-effort value is fine. Do NOT set booking_request when the patient is asking a question
+about availability rather than confirming ("what about Wednesday 2pm?", "is 2pm free?") — that's a
+"proposed_slot" turn instead. Never set booking_request again for an appointment you can see from
+the conversation was already confirmed.
 "date" must be YYYY-MM-DD, "time" must be 24-hour clinic-local HH:MM,
 and "treatment" must match one of the provided treatment names exactly when a treatment
 list was given. Use the current date/time context provided separately to resolve relative

@@ -40,6 +40,7 @@ export async function generateReply(messages, env) {
     reply: parsed.reply,
     extract: parsed.extract ?? null,
     bookingRequest: parsed.booking_request ?? null,
-    statusCheck: parsed.status_check === true
+    statusCheck: parsed.status_check === true,
+    proposedSlot: parsed.proposed_slot ?? null
   };
 }

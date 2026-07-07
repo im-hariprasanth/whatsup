@@ -62,25 +62,78 @@ function zonedTimeToUtc(dateStr, timeStr, timeZone) {
   return new Date(asUTC.getTime() + diff);
 }
 
-// Deterministic, non-AI resolution of a booking request extracted by Groq.
-// Never throws for expected branches — callers get {confirmed, replyOverride,
-// crmSlot} and decide what to actually send/store. replyOverride is null
-// when the AI's own reply (which already assumed success) should stand.
-export async function resolveBooking({ tenant, bookingRequest, patientPhone, env }) {
+// Deterministic, non-AI validation of a slot the assistant is about to
+// propose back to the patient (business hours only — freebusy isn't checked
+// until the patient actually confirms, so we don't spend a Calendar round
+// trip on every "what about Wednesday?" before they've agreed to anything).
+// The returned replyOverride always replaces the model's own phrasing, so
+// the exact date/time/treatment the patient is shown is the same value the
+// code stores as the pending slot — never two independent guesses.
+export function resolveProposedSlot({ tenant, proposedSlot }) {
+  const { date, time, treatment: treatmentName } = proposedSlot;
+  const matchedTreatment = findTreatment(tenant.treatments, treatmentName);
+  const durationMinutes = matchedTreatment?.durationMinutes ?? DEFAULT_DURATION_MINUTES;
+  const treatmentLabel = matchedTreatment?.name || treatmentName || 'that';
+
+  if (
+    tenant.businessHours &&
+    !isWithinBusinessHours({ date, time, durationMinutes, businessHours: tenant.businessHours })
+  ) {
+    const hours = hoursForDay(date, tenant.businessHours);
+    return {
+      valid: false,
+      replyOverride: hours
+        ? `That time doesn't work — we're open ${formatTime12h(hours.open)}–${formatTime12h(hours.close)} that day. Could you pick another time?`
+        : `We're closed that day. Could you pick another day?`
+    };
+  }
+
+  return {
+    valid: true,
+    replyOverride: `We have availability on ${date} at ${formatTime12h(time)} for ${treatmentLabel}. Shall I book that for you?`,
+    slot: { date, time, treatment: treatmentName }
+  };
+}
+
+// Deterministic, non-AI resolution of a booking request. Never throws for
+// expected branches — callers get {confirmed, replyOverride, crmSlot} and
+// decide what to actually send/store. replyOverride is null when the AI's
+// own reply (which already assumed success) should stand.
+//
+// `bookingRequest` should be the code-verified pending slot (see
+// pendingSlot.js) whenever one exists for this patient, rather than the
+// model's own fresh extraction — verified live that a small model asked to
+// recall a slot it proposed one turn earlier can invent a different date
+// AND time than what it actually told the patient.
+export async function resolveBooking({ tenant, bookingRequest, patientPhone, env, skipNameCheck }) {
   const { date, time, treatment: treatmentName } = bookingRequest;
   const matchedTreatment = findTreatment(tenant.treatments, treatmentName);
   const durationMinutes = matchedTreatment?.durationMinutes ?? DEFAULT_DURATION_MINUTES;
 
-  // A small model re-reading plain-text history can re-emit the exact same
-  // booking_request on a later, unrelated turn (e.g. the patient just says
-  // "thank you") since nothing in the transcript marks it as already
-  // resolved. Without this guard that re-triggers a real calendar write,
-  // which then "conflicts" with the event it created a moment earlier and
-  // reports a false "slot was just taken" to a patient who already has it confirmed.
+  // A small model re-reading plain-text history can re-emit a booking_request
+  // on a later, unrelated turn (e.g. the patient just says "thank you") since
+  // nothing in the transcript marks it as already resolved. Without this
+  // guard that re-triggers a real calendar write, which then "conflicts"
+  // with the event it created a moment earlier and reports a false "slot
+  // was just taken" to a patient who already has it confirmed.
   const existingClient = await getClient(tenant.clinicId, patientPhone, env);
   if (existingClient?.appointment_slot === `${date} ${time}`) {
     console.log(`[booking:already-confirmed] ${tenant.clinicId} ${date} ${time}`);
     return { confirmed: true, replyOverride: null, crmSlot: existingClient.appointment_slot };
+  }
+
+  // A clinic wants a name attached to every real booking. Ask for it once,
+  // deterministically, before ever touching the calendar — the caller is
+  // expected to hold the slot pending and re-call with skipNameCheck once
+  // the patient's next message supplies it (see handleMessage.js).
+  if (!skipNameCheck && !existingClient?.name) {
+    console.log(`[booking:needs-name] ${tenant.clinicId} ${date} ${time}`);
+    return {
+      confirmed: false,
+      needsName: true,
+      replyOverride: `Great — I can get that booked. Could I get your name for the appointment?`,
+      crmSlot: null
+    };
   }
 
   if (
