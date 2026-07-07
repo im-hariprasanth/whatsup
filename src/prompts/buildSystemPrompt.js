@@ -37,10 +37,11 @@ function formatTreatments(treatments) {
 function formatKnownPatient(existingClient) {
   if (!existingClient?.name) return null;
 
+  const firstName = existingClient.name.trim().split(/\s+/)[0];
   const interest = existingClient.treatment_interest
-    ? ` They previously showed interest in ${existingClient.treatment_interest}.`
+    ? ` They've shown interest in ${existingClient.treatment_interest}.`
     : '';
-  return `You already know this patient from a past conversation — their name is ${existingClient.name}.${interest} Greet them by name and don't ask for it again unless they want to change it.`;
+  return `You know this patient — their name is ${firstName}.${interest} Use their first name naturally when greeting them, exactly like you'd already know a regular. Do not say or imply anything about this being a new conversation, recalling a previous one, or remembering them — just speak as if you've always known them. Never use their full name; first name only.`;
 }
 
 const DAY_ORDER = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
