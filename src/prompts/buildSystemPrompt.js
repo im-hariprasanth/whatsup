@@ -44,6 +44,20 @@ function formatKnownPatient(existingClient) {
   return `You know this patient — their name is ${firstName}.${interest} Use their first name naturally when greeting them, exactly like you'd already know a regular. Do not say or imply anything about this being a new conversation, recalling a previous one, or remembering them — just speak as if you've always known them. Never use their full name; first name only.`;
 }
 
+// A declined proposal (out of hours / a real calendar conflict) still tells
+// us which day the patient is discussing, even though that specific time
+// didn't work. Without this, a bare follow-up time with no day mentioned
+// ("3pm?") gave the model nothing to anchor to — verified live that it
+// defaulted to booking *today* instead of the day already established,
+// silently, with no error. This re-supplies that day as an explicit hint
+// rather than leaving the model to infer it from raw chat history.
+function formatPendingDateHint(pendingSlot) {
+  if (!pendingSlot || pendingSlot.awaitingName) return null;
+
+  const treatmentNote = pendingSlot.treatment ? ` for ${pendingSlot.treatment}` : '';
+  return `The most recent specific date discussed with this patient in this conversation is ${pendingSlot.date}${treatmentNote}. If they now mention only a time without repeating the day, assume they still mean this date unless they clearly say a different day.`;
+}
+
 const DAY_ORDER = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
 // Renders the tenant's structured business hours into prompt text. Returns
@@ -100,7 +114,7 @@ function formatTodayContext(timezone) {
 // business content (persona, tone, treatments, hours); this function is the
 // only place that decides the final shape and ordering, so every tenant gets
 // the same structure regardless of what they filled in.
-export function buildSystemPrompt(tenant, existingClient) {
+export function buildSystemPrompt(tenant, existingClient, pendingSlot) {
   const sections = [tenant.personaPrompt, SALES_FLOW_GUIDANCE];
 
   if (tenant.salesStyle) {
@@ -110,6 +124,11 @@ export function buildSystemPrompt(tenant, existingClient) {
   const knownPatientSection = formatKnownPatient(existingClient);
   if (knownPatientSection) {
     sections.push(knownPatientSection);
+  }
+
+  const pendingDateHint = formatPendingDateHint(pendingSlot);
+  if (pendingDateHint) {
+    sections.push(pendingDateHint);
   }
 
   const specialtySection = formatSpecialty(tenant.specialty);

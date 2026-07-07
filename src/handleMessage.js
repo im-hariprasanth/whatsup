@@ -87,7 +87,7 @@ export async function handleMessage(payload, env) {
   const existingClient = await getClient(tenant.clinicId, patientPhone, env);
 
   const messages = [
-    { role: 'system', content: buildSystemPrompt(tenant, existingClient) },
+    { role: 'system', content: buildSystemPrompt(tenant, existingClient, pendingSlot) },
     ...history,
     { role: 'user', content: message.text.body }
   ];
@@ -116,7 +116,7 @@ export async function handleMessage(payload, env) {
     if (proposal.valid) {
       await savePendingSlot(tenant.clinicId, patientPhone, { ...proposal.slot, awaitingName: false }, env);
     }
-  } else if (confirmBooking && pendingSlot) {
+  } else if (confirmBooking && pendingSlot && !pendingSlot.declined) {
     // Only ever book the code-verified pending slot, never a value the model
     // supplied itself — confirm_booking is a plain boolean precisely so the
     // model is never asked to produce a date/time it might not actually have.
@@ -124,8 +124,21 @@ export async function handleMessage(payload, env) {
     bookingResult = await resolveBooking({ tenant, bookingRequest: pendingSlot, patientPhone, env });
     if (bookingResult.needsName) {
       await savePendingSlot(tenant.clinicId, patientPhone, { ...pendingSlot, awaitingName: true }, env);
-    } else {
+    } else if (bookingResult.confirmed) {
       await clearPendingSlot(tenant.clinicId, patientPhone, env);
+    } else {
+      // Declined (out of hours / a real calendar conflict) — the day is
+      // still what's being discussed, only that specific time didn't work.
+      // Keep the date as a hint instead of erasing it outright: verified
+      // live that once the pending slot was fully cleared, a bare follow-up
+      // time ("3pm?") with no day gave the model nothing to anchor to and it
+      // silently defaulted to booking *today* instead of the day already
+      // established — a wrong booking with no error, the worst kind.
+      await savePendingSlot(
+        tenant.clinicId, patientPhone,
+        { date: pendingSlot.date, treatment: pendingSlot.treatment, awaitingName: false, declined: true },
+        env
+      );
     }
     if (bookingResult.replyOverride) {
       finalReply = bookingResult.replyOverride;
