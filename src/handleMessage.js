@@ -2,7 +2,7 @@ import { getTenant } from './lib/tenant.js';
 import { getHistory, saveHistory } from './lib/history.js';
 import { generateReply } from './lib/groq.js';
 import { sendReply } from './lib/whatsapp.js';
-import { saveToCRM } from './lib/crm.js';
+import { saveToCRM, getClient } from './lib/crm.js';
 import { claimMessage } from './lib/idempotency.js';
 import { resolveBooking, resolveProposedSlot } from './lib/booking.js';
 import { resolveStatusCheck } from './lib/statusCheck.js';
@@ -84,16 +84,17 @@ export async function handleMessage(payload, env) {
   }
 
   const history = await getHistory(historyKey, env);
+  const existingClient = await getClient(tenant.clinicId, patientPhone, env);
 
   const messages = [
-    { role: 'system', content: buildSystemPrompt(tenant) },
+    { role: 'system', content: buildSystemPrompt(tenant, existingClient) },
     ...history,
     { role: 'user', content: message.text.body }
   ];
 
   console.log(`[groq:request] ${historyKey}`, JSON.stringify(messages));
 
-  const { reply, extract, bookingRequest, statusCheck, proposedSlot } = await generateReply(messages, env);
+  const { reply, extract, proposedSlot, confirmBooking, statusCheck } = await generateReply(messages, env);
 
   console.log(`[groq:response] ${historyKey} reply=${reply} extract=${JSON.stringify(extract)}`);
 
@@ -115,20 +116,28 @@ export async function handleMessage(payload, env) {
     if (proposal.valid) {
       await savePendingSlot(tenant.clinicId, patientPhone, { ...proposal.slot, awaitingName: false }, env);
     }
-  } else if (bookingRequest) {
-    // Prefer the code-verified pending slot over the model's fresh
-    // extraction whenever one exists for this patient.
-    const effectiveBookingRequest = pendingSlot ?? bookingRequest;
-    console.log(`[booking:request] ${historyKey}`, JSON.stringify(effectiveBookingRequest));
-    bookingResult = await resolveBooking({ tenant, bookingRequest: effectiveBookingRequest, patientPhone, env });
+  } else if (confirmBooking && pendingSlot) {
+    // Only ever book the code-verified pending slot, never a value the model
+    // supplied itself — confirm_booking is a plain boolean precisely so the
+    // model is never asked to produce a date/time it might not actually have.
+    console.log(`[booking:confirm] ${historyKey}`, JSON.stringify(pendingSlot));
+    bookingResult = await resolveBooking({ tenant, bookingRequest: pendingSlot, patientPhone, env });
     if (bookingResult.needsName) {
-      await savePendingSlot(tenant.clinicId, patientPhone, { ...effectiveBookingRequest, awaitingName: true }, env);
+      await savePendingSlot(tenant.clinicId, patientPhone, { ...pendingSlot, awaitingName: true }, env);
     } else {
       await clearPendingSlot(tenant.clinicId, patientPhone, env);
     }
     if (bookingResult.replyOverride) {
       finalReply = bookingResult.replyOverride;
     }
+  } else if (confirmBooking) {
+    // The model signaled a confirmation but no slot was ever actually
+    // proposed/verified for this patient — verified live that without this
+    // guard the model will fabricate a date/time to fill the gap rather than
+    // admit it doesn't have one. Recover by asking for specifics instead of
+    // trusting anything it invents.
+    console.log(`[booking:confirm-no-pending] ${historyKey}`);
+    finalReply = `Happy to get that booked — what day and time would you like to come in?`;
   } else if (statusCheck) {
     console.log(`[status:check] ${historyKey}`);
     const statusResult = await resolveStatusCheck({ tenant, patientPhone, env });

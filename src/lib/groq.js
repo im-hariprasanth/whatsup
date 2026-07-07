@@ -3,8 +3,8 @@ const MODEL = 'llama-3.1-8b-instant';
 
 // One Groq call does quadruple duty: `messages` already includes the system
 // prompt (tenant persona + fixed JSON contract) plus rolling history plus the
-// new user message. Returns the parsed { reply, extract, bookingRequest,
-// statusCheck } — never a second call in the common path.
+// new user message. Returns the parsed { reply, extract, proposedSlot,
+// confirmBooking, statusCheck } — never a second call in the common path.
 export async function generateReply(messages, env) {
   const response = await fetch(GROQ_URL, {
     method: 'POST',
@@ -39,8 +39,8 @@ export async function generateReply(messages, env) {
   return {
     reply: parsed.reply,
     extract: parsed.extract ?? null,
-    bookingRequest: parsed.booking_request ?? null,
-    statusCheck: parsed.status_check === true,
-    proposedSlot: parsed.proposed_slot ?? null
+    proposedSlot: parsed.proposed_slot ?? null,
+    confirmBooking: parsed.confirm_booking === true,
+    statusCheck: parsed.status_check === true
   };
 }

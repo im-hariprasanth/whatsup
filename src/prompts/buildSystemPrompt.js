@@ -29,6 +29,20 @@ function formatTreatments(treatments) {
   return `Treatments offered:\n${lines.join('\n')}`;
 }
 
+// Renders what's already known about this specific patient from the CRM, so
+// a returning patient gets greeted by name instead of generically — the
+// model otherwise has no visibility into anything outside the rolling
+// last-8-message history, which rolls off (and now expires after 30 days),
+// so a returning patient in a fresh conversation was invisible to it.
+function formatKnownPatient(existingClient) {
+  if (!existingClient?.name) return null;
+
+  const interest = existingClient.treatment_interest
+    ? ` They previously showed interest in ${existingClient.treatment_interest}.`
+    : '';
+  return `You already know this patient from a past conversation — their name is ${existingClient.name}.${interest} Greet them by name and don't ask for it again unless they want to change it.`;
+}
+
 const DAY_ORDER = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
 // Renders the tenant's structured business hours into prompt text. Returns
@@ -85,11 +99,16 @@ function formatTodayContext(timezone) {
 // business content (persona, tone, treatments, hours); this function is the
 // only place that decides the final shape and ordering, so every tenant gets
 // the same structure regardless of what they filled in.
-export function buildSystemPrompt(tenant) {
+export function buildSystemPrompt(tenant, existingClient) {
   const sections = [tenant.personaPrompt, SALES_FLOW_GUIDANCE];
 
   if (tenant.salesStyle) {
     sections.push(`Tone note for this clinic: ${tenant.salesStyle}`);
+  }
+
+  const knownPatientSection = formatKnownPatient(existingClient);
+  if (knownPatientSection) {
+    sections.push(knownPatientSection);
   }
 
   const specialtySection = formatSpecialty(tenant.specialty);
