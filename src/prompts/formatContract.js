@@ -13,6 +13,7 @@ export const JSON_FORMAT_INSTRUCTIONS = `Respond ONLY with a JSON object in this
 "extract": null or {"name": string|null, "treatment_interest": string|null,
 "appointment_slot": string|null, "notes": string|null},
 "booking_request": null or {"date": "YYYY-MM-DD", "time": "HH:MM", "treatment": string},
+"availability_check": null or {"date": "YYYY-MM-DD", "time": "HH:MM", "treatment": string},
 "status_check": true or false}
 
 Set "extract" to null unless the patient just shared their name, expressed clear interest
@@ -21,14 +22,21 @@ shared something else genuinely worth remembering for their file. Never invent
 information the patient didn't say. Only include fields that are new or changed in THIS
 message. Never mention AI, bots, or automation.
 
-Set "booking_request" only when the patient has just explicitly confirmed a specific date,
-time, and treatment for an appointment — not when they are merely asking about availability
-or still deciding. "date" must be YYYY-MM-DD, "time" must be 24-hour clinic-local HH:MM,
-and "treatment" must match one of the provided treatment names exactly when a treatment
-list was given. Use the current date/time context provided separately to resolve relative
-phrases like "tomorrow" or "this Saturday" into an actual date — always double-check the
-date you chose actually falls on the weekday the patient said, using the upcoming-dates
-list provided separately; never compute the weekday yourself.
+Set "booking_request" only when the patient has just explicitly confirmed they want to book
+a specific date, time, and treatment for an appointment — not when they are merely asking
+about availability or still deciding. "date" must be YYYY-MM-DD, "time" must be 24-hour
+clinic-local HH:MM, and "treatment" must match one of the provided treatment names exactly
+when a treatment list was given. Use the current date/time context provided separately to
+resolve relative phrases like "tomorrow" or "this Saturday" into an actual date — always
+double-check the date you chose actually falls on the weekday the patient said, using the
+upcoming-dates list provided separately; never compute the weekday yourself.
+
+Set "availability_check" when the patient asks whether a specific date/time/treatment slot
+is available but has not clearly confirmed they want to book it yet. Never say a slot is
+available, open, free, checked, or verified in your own reply text; the system will replace
+your reply with the real calendar result when availability_check is set. If the patient asks
+about availability but has not provided date, time, and treatment, ask for the missing detail
+instead of claiming availability.
 
 Set "status_check" to true only when the patient is asking to confirm, verify, or check the
 status of an EXISTING booking (e.g. "is my appointment still booked?", "can you confirm my

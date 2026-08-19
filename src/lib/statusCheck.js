@@ -1,10 +1,27 @@
 import { getClient } from './crm.js';
+import { getLatestAppointmentForPatient } from './appointments.js';
 
-// Deterministic, non-AI resolution of a booking status-check question.
-// The model's own "reply" is discarded when status_check is true (see
-// formatContract.js) -- this is the real answer, sourced from D1, not a
-// narrated guess from conversation memory.
+function formatTime(time) {
+  if (!time) return '';
+  const [h, m] = String(time).split(':').map(Number);
+  const hour12 = h % 12 || 12;
+  return `${hour12}:${String(m || 0).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+}
+
 export async function resolveStatusCheck({ tenant, patientPhone, env }) {
+  try {
+    const appointment = await getLatestAppointmentForPatient({ clinicId: tenant.clinicId, patientPhone, env });
+    if (appointment) {
+      console.log(`[status:d1:${appointment.status}] ${tenant.clinicId} ${patientPhone} ${appointment.date} ${appointment.time}`);
+      const statusText = appointment.status === 'confirmed' ? 'booked' : 'noted but pending confirmation';
+      return {
+        replyOverride: `Your ${appointment.treatment} appointment is ${statusText} for ${appointment.date} at ${formatTime(appointment.time)}.`
+      };
+    }
+  } catch (err) {
+    console.error(`[status:d1-appointment-error] ${tenant.clinicId} ${patientPhone}`, err);
+  }
+
   const client = await getClient(tenant.clinicId, patientPhone, env);
 
   if (!client?.appointment_slot) {
@@ -20,7 +37,7 @@ export async function resolveStatusCheck({ tenant, patientPhone, env }) {
 
   if (pending) {
     return {
-      replyOverride: `Your request${treatment} for ${slot} is noted but not yet confirmed on our calendar — we'll confirm shortly.`
+      replyOverride: `Your request${treatment} for ${slot} is noted but not yet confirmed — we'll confirm shortly.`
     };
   }
 

@@ -1,17 +1,26 @@
 import { isWithinBusinessHours, hoursForDay } from './businessHours.js';
-import { refreshAccessToken } from './googleAuth.js';
-import { checkFreeBusy, createEvent } from './googleCalendar.js';
+import { checkAppointmentConflict, createAppointment } from './appointments.js';
 
 const DEFAULT_DURATION_MINUTES = 30;
 
-// Generic degrade-gracefully response, used whenever we can't reach a real
-// confirmed/denied outcome (calendar not connected, or a Google API call
-// failed) — never a false confirmation, always something a human can follow up on.
-function pendingFallback(date, time) {
+function pendingFallback({ tenant, bookingRequest, patientPhone, patientName = null, startUTC = null, endUTC = null }) {
+  const { date, time, treatment } = bookingRequest;
   return {
     confirmed: false,
     replyOverride: `Thanks — I've noted your request for ${date} at ${time}. Our team will confirm your slot shortly.`,
-    crmSlot: `${date} ${time} (pending confirmation)`
+    crmSlot: `${date} ${time} (pending confirmation)`,
+    appointment: {
+      clinicId: tenant.clinicId,
+      patientPhone,
+      patientName,
+      treatment,
+      date,
+      time,
+      startAt: startUTC?.toISOString?.() || null,
+      endAt: endUTC?.toISOString?.() || null,
+      status: 'pending_confirmation',
+      source: 'whatsapp_ai'
+    }
   };
 }
 
@@ -21,18 +30,8 @@ function findTreatment(treatments, name) {
   return treatments.find((t) => t.name.toLowerCase() === lower) ?? null;
 }
 
-// Converts clinic-local wall-clock date+time into a UTC Date, correctly
-// handling the zone's offset (and DST, since it's evaluated at this specific
-// instant rather than a fixed constant) without pulling in a timezone library.
-// Built entirely on Intl.DateTimeFormat + Date.UTC, both of which are
-// explicit about timezone regardless of the runtime's own default zone --
-// unlike round-tripping through toLocaleString()/new Date(string), which
-// silently breaks in any environment where the host isn't UTC (verified the
-// hard way: local `wrangler dev` on a non-UTC host produced a booking off by
-// exactly the zone's offset, even though real deployed Workers run in UTC).
 function zonedTimeToUtc(dateStr, timeStr, timeZone) {
   const asUTC = new Date(`${dateStr}T${timeStr}:00Z`);
-
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
     year: 'numeric',
@@ -44,10 +43,6 @@ function zonedTimeToUtc(dateStr, timeStr, timeZone) {
     hour12: false
   }).formatToParts(asUTC);
   const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
-
-  // What asUTC's instant looks like in the target zone, reinterpreted as if
-  // those wall-clock numbers were themselves UTC (Date.UTC is always UTC,
-  // never dependent on the host system's local timezone).
   const inZoneAsUTC = Date.UTC(
     Number(map.year),
     Number(map.month) - 1,
@@ -56,95 +51,147 @@ function zonedTimeToUtc(dateStr, timeStr, timeZone) {
     Number(map.minute),
     Number(map.second)
   );
-
   const diff = asUTC.getTime() - inZoneAsUTC;
   return new Date(asUTC.getTime() + diff);
 }
 
-// Deterministic, non-AI resolution of a booking request extracted by Groq.
-// Never throws for expected branches — callers get {confirmed, replyOverride,
-// crmSlot} and decide what to actually send/store. replyOverride is null
-// when the AI's own reply (which already assumed success) should stand.
-export async function resolveBooking({ tenant, bookingRequest, patientPhone, env }) {
-  const { date, time, treatment: treatmentName } = bookingRequest;
-  const matchedTreatment = findTreatment(tenant.treatments, treatmentName);
-  const durationMinutes = matchedTreatment?.durationMinutes ?? DEFAULT_DURATION_MINUTES;
+function slotTimes({ tenant, request, durationMinutes }) {
+  const timezone = tenant.businessHours?.timezone ?? 'UTC';
+  const startUTC = zonedTimeToUtc(request.date, request.time, timezone);
+  const endUTC = new Date(startUTC.getTime() + durationMinutes * 60000);
+  return { startUTC, endUTC };
+}
 
+function appointmentCapacity(tenant) {
+  const capacity = Number(tenant.appointmentSlotCapacity || tenant.booking?.slotCapacity || 1);
+  return Number.isFinite(capacity) && capacity > 0 ? capacity : 1;
+}
+
+function inspectBusinessHours({ tenant, request, durationMinutes }) {
+  const { date, time } = request;
   if (
     tenant.businessHours &&
     !isWithinBusinessHours({ date, time, durationMinutes, businessHours: tenant.businessHours })
   ) {
     const hours = hoursForDay(date, tenant.businessHours);
-    console.log(`[booking:out-of-hours] ${tenant.clinicId} ${date} ${time}`);
     return {
-      confirmed: false,
-      replyOverride: hours
+      available: false,
+      reason: 'out-of-hours',
+      reply: hours
         ? `Sorry, that time doesn't work — we're open ${hours.open}–${hours.close} that day. Could you pick another time?`
-        : `Sorry, we're closed that day. Could you pick another day?`,
-      crmSlot: null
+        : `Sorry, we're closed that day. Could you pick another day?`
+    };
+  }
+  return null;
+}
+
+async function inspectSlot({ tenant, request, env }) {
+  const matchedTreatment = findTreatment(tenant.treatments, request.treatment);
+  const durationMinutes = matchedTreatment?.durationMinutes ?? DEFAULT_DURATION_MINUTES;
+  const hoursResult = inspectBusinessHours({ tenant, request, durationMinutes });
+  if (hoursResult) return { ...hoursResult, durationMinutes };
+
+  const { startUTC, endUTC } = slotTimes({ tenant, request, durationMinutes });
+
+  try {
+    const capacity = appointmentCapacity(tenant);
+    const conflict = await checkAppointmentConflict({
+      clinicId: tenant.clinicId,
+      startAt: startUTC.toISOString(),
+      endAt: endUTC.toISOString(),
+      capacity,
+      env
+    });
+    return {
+      available: !conflict,
+      reason: conflict ? 'conflict' : 'free',
+      conflict,
+      startUTC,
+      endUTC,
+      durationMinutes,
+      capacity
+    };
+  } catch (err) {
+    console.error(`[booking:d1-check-failed] ${tenant.clinicId}`, err);
+    return { available: null, reason: 'd1-check-failed', startUTC, endUTC, durationMinutes };
+  }
+}
+
+export async function resolveAvailability({ tenant, availabilityCheck, env }) {
+  const { date, time } = availabilityCheck;
+  const slot = await inspectSlot({ tenant, request: availabilityCheck, env });
+
+  if (slot.available === true) {
+    console.log(`[availability:free] ${tenant.clinicId} ${date} ${time}`);
+    return {
+      replyOverride: `Yes, ${date} at ${time} is currently available. Would you like me to book it for your consultation?`
     };
   }
 
-  if (!tenant.googleCalendar) {
-    console.log(`[booking:not-connected] ${tenant.clinicId} ${date} ${time}`);
-    return pendingFallback(date, time);
+  if (slot.available === false) {
+    console.log(`[availability:${slot.reason}] ${tenant.clinicId} ${date} ${time}`);
+    return {
+      replyOverride: slot.reply || `Sorry, that slot is already booked. Could you pick another time?`
+    };
   }
 
-  const timezone = tenant.businessHours?.timezone ?? 'UTC';
-  const startUTC = zonedTimeToUtc(date, time, timezone);
-  const endUTC = new Date(startUTC.getTime() + durationMinutes * 60000);
+  console.log(`[availability:${slot.reason}] ${tenant.clinicId} ${date} ${time}`);
+  return {
+    replyOverride: `I can help with that request for ${date} at ${time}. Our team will confirm the exact availability shortly.`
+  };
+}
 
-  let accessToken;
-  try {
-    ({ accessToken } = await refreshAccessToken({
-      refreshToken: tenant.googleCalendar.refreshToken,
-      env
-    }));
-  } catch (err) {
-    console.error(`[booking:refresh-failed] ${tenant.clinicId}`, err);
-    return pendingFallback(date, time);
-  }
+export async function resolveBooking({ tenant, bookingRequest, patientPhone, patientName = null, env }) {
+  const { date, time, treatment: treatmentName } = bookingRequest;
+  const slot = await inspectSlot({ tenant, request: bookingRequest, env });
 
-  let conflict;
-  try {
-    conflict = await checkFreeBusy({
-      accessToken,
-      calendarId: tenant.googleCalendar.calendarId,
-      startUTC: startUTC.toISOString(),
-      endUTC: endUTC.toISOString()
-    });
-  } catch (err) {
-    console.error(`[booking:freebusy-failed] ${tenant.clinicId}`, err);
-    return pendingFallback(date, time);
-  }
-
-  if (conflict) {
-    console.log(`[booking:conflict] ${tenant.clinicId} ${date} ${time}`);
+  if (slot.available === false) {
+    console.log(`[booking:${slot.reason}] ${tenant.clinicId} ${date} ${time}`);
     return {
       confirmed: false,
-      replyOverride: `Sorry, that slot was just taken. Could you pick another time?`,
+      replyOverride: slot.reply || `Sorry, that slot is already booked. Could you pick another time?`,
       crmSlot: null
     };
   }
 
+  if (slot.available === null) {
+    console.log(`[booking:${slot.reason}] ${tenant.clinicId} ${date} ${time}`);
+    return pendingFallback({ tenant, bookingRequest, patientPhone, patientName, startUTC: slot.startUTC, endUTC: slot.endUTC });
+  }
+
+  let appointment;
   try {
-    await createEvent({
-      accessToken,
-      calendarId: tenant.googleCalendar.calendarId,
-      summary: `${treatmentName || 'Appointment'} — WhatsApp booking`,
-      description: `Booked via WhatsApp receptionist. Patient: ${patientPhone}`,
-      startUTC: startUTC.toISOString(),
-      endUTC: endUTC.toISOString()
-    });
+    appointment = await createAppointment({
+      clinicId: tenant.clinicId,
+      patientPhone,
+      patientName,
+      treatment: treatmentName,
+      date,
+      time,
+      durationMinutes: slot.durationMinutes,
+      startAt: slot.startUTC.toISOString(),
+      endAt: slot.endUTC.toISOString(),
+      status: 'confirmed',
+      source: 'whatsapp_ai'
+    }, env);
   } catch (err) {
-    console.error(`[booking:create-failed] ${tenant.clinicId}`, err);
-    return pendingFallback(date, time);
+    if (err.code === 'slot_conflict') {
+      console.log(`[booking:conflict] ${tenant.clinicId} ${date} ${time}`);
+      return {
+        confirmed: false,
+        replyOverride: `Sorry, that slot is already booked. Could you pick another time?`,
+        crmSlot: null
+      };
+    }
+    console.error(`[booking:d1-create-failed] ${tenant.clinicId}`, err);
+    return pendingFallback({ tenant, bookingRequest, patientPhone, patientName, startUTC: slot.startUTC, endUTC: slot.endUTC });
   }
 
   console.log(`[booking:confirmed] ${tenant.clinicId} ${date} ${time}`);
   return {
     confirmed: true,
-    replyOverride: null, // the AI's own reply already said "booked" — let it stand
-    crmSlot: `${date} ${time}`
+    replyOverride: `Confirmed — your consultation is booked for ${date} at ${time}. We look forward to seeing you.`,
+    crmSlot: `${date} ${time}`,
+    appointment
   };
 }

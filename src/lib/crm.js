@@ -35,32 +35,3 @@ export async function getClient(clinicId, phone, env) {
     .first();
 }
 
-// --- Alternative long-term memory backends (NOT used — kept for reference only) ---
-//
-// If a future tenant needs a spreadsheet-friendly or no-code-friendly CRM instead
-// of D1, either of these could replace saveToCRM's body. Both are outside the
-// fixed tech stack for v1 and would need to be flagged/approved before use.
-//
-// Supabase (Postgres), upsert via PostgREST:
-//
-// async function saveToCRMSupabase(clinicId, phone, extract, env) {
-//   await fetch(`${env.SUPABASE_URL}/rest/v1/clients?on_conflict=clinic_id,phone`, {
-//     method: 'POST',
-//     headers: {
-//       apikey: env.SUPABASE_SERVICE_KEY,
-//       Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-//       'Content-Type': 'application/json',
-//       Prefer: 'resolution=merge-duplicates'
-//     },
-//     body: JSON.stringify({ clinic_id: clinicId, phone, ...extract })
-//   });
-// }
-//
-// Google Sheets, via an Apps Script "web app" webhook:
-//
-// async function saveToCRMSheets(clinicId, phone, extract, env) {
-//   await fetch(env.SHEETS_WEBHOOK_URL, {
-//     method: 'POST',
-//     body: JSON.stringify({ clinicId, phone, ...extract, timestamp: new Date().toISOString() })
-//   });
-// }

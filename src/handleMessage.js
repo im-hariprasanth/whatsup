@@ -3,10 +3,14 @@ import { getHistory, saveHistory } from './lib/history.js';
 import { generateReply } from './lib/groq.js';
 import { sendReply } from './lib/whatsapp.js';
 import { saveToCRM } from './lib/crm.js';
+import { markLeadReplied } from './lib/leads.js';
 import { claimMessage } from './lib/idempotency.js';
-import { resolveBooking } from './lib/booking.js';
+import { resolveAvailability, resolveBooking } from './lib/booking.js';
 import { resolveStatusCheck } from './lib/statusCheck.js';
 import { buildSystemPrompt } from './prompts/buildSystemPrompt.js';
+import { validateModelOutput } from './lib/validateModelOutput.js';
+import { applyMedicalSafety } from './lib/medicalSafety.js';
+import { saveConversationState } from './lib/conversationState.js';
 
 // Orchestrates one inbound WhatsApp message end to end:
 // tenant lookup -> rolling history -> Groq -> WhatsApp reply -> history write -> CRM upsert.
@@ -38,6 +42,7 @@ export async function handleMessage(payload, env) {
   }
 
   const patientPhone = message.from;
+  await markLeadReplied({ clinicId: tenant.clinicId, phone: patientPhone, env });
   const historyKey = `${tenant.clinicId}:${patientPhone}`;
   const history = await getHistory(historyKey, env);
 
@@ -49,7 +54,8 @@ export async function handleMessage(payload, env) {
 
   console.log(`[groq:request] ${historyKey}`, JSON.stringify(messages));
 
-  const { reply, extract, bookingRequest, statusCheck } = await generateReply(messages, env);
+  const rawModelOutput = await generateReply(messages, env);
+  const { reply, extract, bookingRequest, availabilityCheck, statusCheck } = validateModelOutput(rawModelOutput, tenant);
 
   console.log(`[groq:response] ${historyKey} reply=${reply} extract=${JSON.stringify(extract)}`);
 
@@ -63,15 +69,36 @@ export async function handleMessage(payload, env) {
 
   if (bookingRequest) {
     console.log(`[booking:request] ${historyKey}`, JSON.stringify(bookingRequest));
-    bookingResult = await resolveBooking({ tenant, bookingRequest, patientPhone, env });
+    bookingResult = await resolveBooking({ tenant, bookingRequest, patientPhone, patientName: extract?.name || null, env });
     if (bookingResult.replyOverride) {
       finalReply = bookingResult.replyOverride;
     }
+  } else if (availabilityCheck) {
+    console.log(`[availability:check] ${historyKey}`, JSON.stringify(availabilityCheck));
+    const availabilityResult = await resolveAvailability({ tenant, availabilityCheck, env });
+    finalReply = availabilityResult.replyOverride;
+    await saveConversationState({
+      clinicId: tenant.clinicId,
+      patientPhone,
+      state: { stage: 'availability_checked', lastOfferedSlot: availabilityCheck },
+      env
+    });
   } else if (statusCheck) {
     console.log(`[status:check] ${historyKey}`);
     const statusResult = await resolveStatusCheck({ tenant, patientPhone, env });
     finalReply = statusResult.replyOverride;
   }
+
+  if (bookingResult.confirmed) {
+    await saveConversationState({
+      clinicId: tenant.clinicId,
+      patientPhone,
+      state: { stage: 'booked', lastBookedSlot: bookingRequest },
+      env
+    });
+  }
+
+  finalReply = applyMedicalSafety({ userText: message.text.body, reply: finalReply });
 
   // Send the reply. A WhatsApp send failure (e.g. an invalid/placeholder token
   // in local dev) shouldn't stop history/CRM writes, so it's logged, not thrown.
