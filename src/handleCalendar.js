@@ -97,14 +97,10 @@ export async function handleCalendar(request, env) {
         <span class="ml-1.5">${escapeHtml(appt.patient_name || appt.patient_phone || 'Patient')}</span>
       </button>`).join('');
     const more = hourAppointments.length > 4 ? `<button type="button" onclick="openSlot(${hour})" class="rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100">+${hourAppointments.length - 4} more</button>` : '';
-    const count = hourAppointments.length ? `<span class="rounded-full bg-white px-2.5 py-1 text-[11px] font-bold text-keva-muted ring-1 ring-keva-line">${hourAppointments.length}/4 booked</span>` : '';
     return `<div class="grid grid-cols-[58px_1fr] sm:grid-cols-[72px_1fr]">
       <div class="border-r border-keva-line pr-2 pt-3 text-right text-xs text-keva-muted">${escapeHtml(hourLabel(hour))}</div>
       <div class="min-h-[72px] border-b border-keva-line px-3 py-3">
-        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div class="flex min-w-0 flex-wrap items-center gap-2">${visibleCards}${more}</div>
-          ${count}
-        </div>
+        <div class="flex min-w-0 flex-wrap items-center gap-2">${visibleCards}${more}</div>
       </div>
     </div>`;
   }).join('');
@@ -200,8 +196,7 @@ function renderSchedule(appointments){
     const slot=appointments.filter(a=>Number(String(a.time||'').split(':')[0])===hour);
     const chips=slot.slice(0,4).map(a=>'<button type="button" onclick="openAppointment(this)" class="max-w-full rounded-full border border-keva-line bg-keva-soft px-3 py-1.5 text-xs font-semibold text-keva-ink shadow-sm transition hover:border-keva-brand hover:bg-white"'+apptAttrs(a)+'><span class="inline-block h-2 w-2 rounded-full bg-keva-brand"></span><span class="ml-1.5">'+esc(a.patientName||a.patientPhone||'Patient')+'</span></button>').join('');
     const more=slot.length>4?'<button type="button" onclick="openSlot('+hour+')" class="rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100">+'+(slot.length-4)+' more</button>':'';
-    const count=slot.length?'<span class="rounded-full bg-white px-2.5 py-1 text-[11px] font-bold '+(slot.length>4?'text-red-700 ring-red-200':'text-keva-muted ring-keva-line')+' ring-1">'+slot.length+'/4 booked</span>':'';
-    return '<div class="grid grid-cols-[58px_1fr] sm:grid-cols-[72px_1fr]"><div class="border-r border-keva-line pr-2 pt-3 text-right text-xs text-keva-muted">'+esc(hourLabel(hour))+'</div><div class="min-h-[72px] border-b border-keva-line px-3 py-3"><div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div class="flex min-w-0 flex-wrap items-center gap-2">'+chips+more+'</div>'+count+'</div></div></div>';
+    return '<div class="grid grid-cols-[58px_1fr] sm:grid-cols-[72px_1fr]"><div class="border-r border-keva-line pr-2 pt-3 text-right text-xs text-keva-muted">'+esc(hourLabel(hour))+'</div><div class="min-h-[72px] border-b border-keva-line px-3 py-3"><div class="flex min-w-0 flex-wrap items-center gap-2">'+chips+more+'</div></div></div>';
   }).join('');
 }
 function openAppointment(el){
