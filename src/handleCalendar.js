@@ -33,6 +33,37 @@ function dateHeader(date, timezone) {
   return { weekday: map.weekday?.toUpperCase() || '', day: map.day || '', title: `${map.month} ${map.day}, ${map.year}`, timezone };
 }
 
+function appointmentPayload(appt) {
+  return {
+    id: appt.id,
+    time: appt.time,
+    displayTime: appointmentTime(appt.time),
+    patientName: appt.patient_name || '—',
+    patientPhone: appt.patient_phone || '',
+    treatment: appt.treatment || 'Appointment',
+    status: appt.status || '',
+    source: appt.source || '—',
+    notes: appt.notes || '—'
+  };
+}
+
+export async function handleAppointmentsApi(request, env) {
+  const authResponse = await requireAuth(request, env);
+  if (authResponse) return authResponse;
+
+  const url = new URL(request.url);
+  const clinicId = url.searchParams.get('clinic') || url.searchParams.get('clinicId') || 'bonitaa';
+  const tenant = await getTenantByClinicId(clinicId, env);
+  if (!tenant) return new Response(JSON.stringify({ error: 'tenant_not_found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+
+  const timezone = tenant.businessHours?.timezone || 'Asia/Kolkata';
+  const date = url.searchParams.get('date') || formatLocalDate(new Date(), timezone);
+  const appointments = await listAppointments({ clinicId, date, env });
+  return new Response(JSON.stringify({ clinicId, date, timezone, generatedAt: new Date().toISOString(), appointments: appointments.map(appointmentPayload) }), {
+    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }
+  });
+}
+
 export async function handleCalendar(request, env) {
   const authResponse = await requireAuth(request, env);
   if (authResponse) return authResponse;
@@ -82,6 +113,7 @@ export async function handleCalendar(request, env) {
     </div>`;
   }).join('');
   const headerDate = dateHeader(date, timezone);
+  const initialAppointments = JSON.stringify(appointments.map(appointmentPayload)).replace(/</g, '\\u003c');
 
   const prev = new Date(`${date}T00:00:00Z`); prev.setUTCDate(prev.getUTCDate() - 1);
   const next = new Date(`${date}T00:00:00Z`); next.setUTCDate(next.getUTCDate() + 1);
@@ -126,10 +158,10 @@ export async function handleCalendar(request, env) {
       <div class="border-r border-keva-line"></div>
       <div class="flex items-end gap-4 px-4 py-3">
         <div class="text-center"><div class="text-[11px] font-semibold text-keva-muted">${escapeHtml(headerDate.weekday)}</div><div class="text-2xl font-normal leading-none text-keva-ink">${escapeHtml(headerDate.day)}</div></div>
-        <div><h2 class="text-lg font-semibold sm:text-xl">${escapeHtml(headerDate.title)}</h2><p class="text-sm text-keva-muted">${appointments.length} appointment${appointments.length === 1 ? '' : 's'} · up to 4 bookings per time slot</p></div>
+        <div><h2 class="text-lg font-semibold sm:text-xl">${escapeHtml(headerDate.title)}</h2><p class="text-sm text-keva-muted"><span id="appointment-count">${appointments.length} appointment${appointments.length === 1 ? '' : 's'}</span> · up to 4 bookings per time slot · <span id="live-status">Live</span></p></div>
       </div>
     </div>
-    <div class="max-h-[72vh] overflow-y-auto">
+    <div id="schedule-body" class="max-h-[72vh] overflow-y-auto">
       ${scheduleRows}
     </div>
   </section>
@@ -149,6 +181,23 @@ export async function handleCalendar(request, env) {
   </div>
 </div>
 <script>
+const clinicId=${JSON.stringify(clinicId)};
+const selectedDate=${JSON.stringify(date)};
+const initialAppointments=${initialAppointments};
+const visibleHours=Array.from({length:13},(_,i)=>i+8);
+function esc(v){return String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
+function hourLabel(hour){if(hour===0)return'12 AM';if(hour<12)return hour+' AM';if(hour===12)return'12 PM';return(hour-12)+' PM';}
+function renderSchedule(appointments){
+  const hours=new Set(visibleHours); appointments.forEach(a=>{const h=Number(String(a.time||'').split(':')[0]); if(!Number.isNaN(h)) hours.add(h);});
+  document.getElementById('appointment-count').textContent=appointments.length+' appointment'+(appointments.length===1?'':'s');
+  document.getElementById('schedule-body').innerHTML=[...hours].sort((a,b)=>a-b).map(hour=>{
+    const cards=appointments.filter(a=>Number(String(a.time||'').split(':')[0])===hour).map((a,index)=>{
+      const minutes=Number(String(a.time||'').split(':')[1]||0); const over=index>=4;
+      return '<button type="button" onclick="openAppointment(this)" style="margin-top:'+Math.min(minutes,45)+'px" class="min-w-[165px] flex-1 rounded-xl border '+(over?'border-red-200 bg-red-50':'border-keva-line bg-keva-soft')+' px-3 py-2.5 text-left text-xs shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:min-w-[205px]" data-time="'+esc(a.displayTime)+'" data-patient="'+esc(a.patientName)+'" data-phone="'+esc(a.patientPhone)+'" data-treatment="'+esc(a.treatment)+'" data-status="'+esc(a.status)+'" data-notes="'+esc(a.notes)+'" data-source="'+esc(a.source)+'"><span class="flex items-start gap-2"><span class="mt-0.5 h-8 w-1.5 shrink-0 rounded-full '+(over?'bg-red-500':'bg-keva-brand')+'"></span><span class="min-w-0 flex-1"><span class="block truncate font-bold text-keva-ink">'+esc(a.patientName||a.patientPhone||'Patient')+'</span><span class="mt-0.5 block truncate font-medium text-keva-muted">'+esc(a.treatment||'Appointment')+'</span><span class="mt-2 inline-flex rounded-full '+(over?'bg-red-100 text-red-700':'bg-white text-keva-brand')+' px-2 py-0.5 text-[11px] font-bold ring-1 '+(over?'ring-red-200':'ring-keva-line')+'">'+esc(a.displayTime)+(over?' · over capacity':'')+'</span></span></span></button>';
+    }).join('');
+    return '<div class="grid grid-cols-[58px_1fr] sm:grid-cols-[72px_1fr]"><div class="border-r border-keva-line pr-2 pt-2 text-right text-xs text-keva-muted">'+esc(hourLabel(hour))+'</div><div class="min-h-[88px] border-b border-keva-line px-2 py-2 sm:px-3"><div class="flex items-start gap-2 overflow-x-auto pb-1">'+cards+'</div></div></div>';
+  }).join('');
+}
 function openAppointment(el){
   const modal=document.getElementById('appointment-modal');
   document.getElementById('modal-treatment').textContent=el.dataset.treatment||'Appointment';
@@ -160,11 +209,18 @@ function openAppointment(el){
   document.getElementById('modal-notes').textContent=el.dataset.notes||'—';
   modal.classList.remove('hidden'); modal.classList.add('flex');
 }
-function closeAppointment(){
-  const modal=document.getElementById('appointment-modal');
-  modal.classList.add('hidden'); modal.classList.remove('flex');
+function closeAppointment(){const modal=document.getElementById('appointment-modal');modal.classList.add('hidden');modal.classList.remove('flex');}
+async function refreshAppointments(){
+  try{
+    const res=await fetch('/api/appointments?clinic='+encodeURIComponent(clinicId)+'&date='+encodeURIComponent(selectedDate),{cache:'no-store'});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const data=await res.json(); renderSchedule(data.appointments||[]);
+    document.getElementById('live-status').textContent='Live · updated '+new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+  }catch(err){document.getElementById('live-status').textContent='Live update paused'; console.warn(err);}
 }
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeAppointment()});
+renderSchedule(initialAppointments);
+setInterval(refreshAppointments,10000);
 </script>
 </body></html>`;
 

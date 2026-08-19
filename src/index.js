@@ -1,7 +1,7 @@
 import { handleMessage } from './handleMessage.js';
 import { handleLeadAds, processDueFollowUps } from './handleLeadAds.js';
 import { handleDashboard } from './handleDashboard.js';
-import { handleCalendar } from './handleCalendar.js';
+import { handleCalendar, handleAppointmentsApi } from './handleCalendar.js';
 import { handleLogin, handleLogout, requireAuth } from './lib/auth.js';
 
 export default {
@@ -22,6 +22,9 @@ export default {
     }
     if (request.method === 'GET' && url.pathname === '/calendar') {
       return handleCalendar(request, env);
+    }
+    if (request.method === 'GET' && url.pathname === '/api/appointments') {
+      return handleAppointmentsApi(request, env);
     }
     if ((request.method === 'GET' || request.method === 'POST') && url.pathname === '/tasks/followups/run') {
       const authResponse = await requireAuth(request, env);
