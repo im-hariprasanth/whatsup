@@ -62,8 +62,7 @@ export async function isAuthenticated(request, env) {
 export async function requireAuth(request, env) {
   if (await isAuthenticated(request, env)) return null;
   const url = new URL(request.url);
-  const next = encodeURIComponent(`${url.pathname}${url.search}`);
-  return Response.redirect(`${url.origin}/login?next=${next}`, 302);
+  return Response.redirect(`${url.origin}/login`, 302);
 }
 
 export async function handleLogin(request, env) {
