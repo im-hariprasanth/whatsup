@@ -19,6 +19,20 @@ function appointmentTime(value) {
   return `${hour12}:${String(m || 0).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
 }
 
+function hourLabel(hour) {
+  if (hour === 0) return '12 AM';
+  if (hour < 12) return `${hour} AM`;
+  if (hour === 12) return '12 PM';
+  return `${hour - 12} PM`;
+}
+
+function dateHeader(date, timezone) {
+  const day = new Date(`${date}T00:00:00Z`);
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' }).formatToParts(day);
+  const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  return { weekday: map.weekday?.toUpperCase() || '', day: map.day || '', title: `${map.month} ${map.day}, ${map.year}`, timezone };
+}
+
 export async function handleCalendar(request, env) {
   const authResponse = await requireAuth(request, env);
   if (authResponse) return authResponse;
@@ -32,15 +46,35 @@ export async function handleCalendar(request, env) {
   const date = url.searchParams.get('date') || formatLocalDate(new Date(), timezone);
   const appointments = await listAppointments({ clinicId, date, env });
 
-  const rows = appointments.map((appt) => `
-    <tr class="border-t border-keva-line/70 hover:bg-keva-soft/40">
-      <td class="whitespace-nowrap px-4 py-3 font-semibold text-keva-ink">${escapeHtml(appointmentTime(appt.time))}</td>
-      <td class="whitespace-nowrap px-4 py-3">${escapeHtml(appt.patient_name || '—')}</td>
-      <td class="whitespace-nowrap px-4 py-3">${escapeHtml(appt.patient_phone)}</td>
-      <td class="whitespace-nowrap px-4 py-3">${escapeHtml(appt.treatment)}</td>
-      <td class="whitespace-nowrap px-4 py-3"><span class="rounded-full bg-keva-soft px-2.5 py-1 text-xs font-semibold ring-1 ring-keva-line">${escapeHtml(appt.status)}</span></td>
-      <td class="whitespace-nowrap px-4 py-3">${escapeHtml(appt.notes || '—')}</td>
-    </tr>`).join('');
+  const visibleHours = new Set(Array.from({ length: 13 }, (_, i) => i + 8));
+  for (const appt of appointments) {
+    const hour = Number(String(appt.time || '').split(':')[0]);
+    if (!Number.isNaN(hour)) visibleHours.add(hour);
+  }
+  const scheduleRows = [...visibleHours].sort((a, b) => a - b).map((hour) => {
+    const hourAppointments = appointments.filter((appt) => Number(String(appt.time || '').split(':')[0]) === hour);
+    const cards = hourAppointments.map((appt) => {
+      const minutes = Number(String(appt.time || '').split(':')[1] || 0);
+      return `<button type="button" onclick="openAppointment(this)" style="margin-top:${Math.min(minutes, 45)}px" class="min-w-[150px] flex-1 rounded-lg bg-[#039be5] px-3 py-2 text-left text-xs font-semibold text-white shadow-sm transition hover:bg-[#0288d1] sm:min-w-[190px]"
+        data-time="${escapeHtml(appointmentTime(appt.time))}"
+        data-patient="${escapeHtml(appt.patient_name || '—')}"
+        data-phone="${escapeHtml(appt.patient_phone)}"
+        data-treatment="${escapeHtml(appt.treatment)}"
+        data-status="${escapeHtml(appt.status)}"
+        data-notes="${escapeHtml(appt.notes || '—')}"
+        data-source="${escapeHtml(appt.source || '—')}">
+        <span class="block truncate">${escapeHtml(appt.treatment || 'Appointment')} — ${escapeHtml(appt.patient_name || appt.patient_phone || 'Patient')}</span>
+        <span class="mt-0.5 block font-medium opacity-90">${escapeHtml(appointmentTime(appt.time))}</span>
+      </button>`;
+    }).join('');
+    return `<div class="grid grid-cols-[58px_1fr] sm:grid-cols-[72px_1fr]">
+      <div class="border-r border-keva-line pr-2 pt-2 text-right text-xs text-keva-muted">${escapeHtml(hourLabel(hour))}</div>
+      <div class="min-h-[78px] border-b border-keva-line px-2 py-1.5 sm:px-3">
+        <div class="flex items-start gap-2 overflow-x-auto">${cards}</div>
+      </div>
+    </div>`;
+  }).join('');
+  const headerDate = dateHeader(date, timezone);
 
   const prev = new Date(`${date}T00:00:00Z`); prev.setUTCDate(prev.getUTCDate() - 1);
   const next = new Date(`${date}T00:00:00Z`); next.setUTCDate(next.getUTCDate() + 1);
@@ -80,11 +114,52 @@ export async function handleCalendar(request, env) {
     </div>
   </section>
 
-  <section class="mt-6 rounded-3xl border border-keva-line bg-white shadow-sm">
-    <div class="border-b border-keva-line p-5 sm:p-6"><h2 class="text-xl font-bold sm:text-2xl">Daily schedule</h2><p class="text-sm text-keva-muted">${appointments.length} appointment${appointments.length === 1 ? '' : 's'} for this date.</p></div>
-    <div class="overflow-x-auto"><table class="min-w-[820px] w-full text-left text-sm text-keva-muted"><thead class="bg-keva-soft text-xs font-bold uppercase tracking-[.18em]"><tr><th class="px-4 py-3">Time</th><th class="px-4 py-3">Patient</th><th class="px-4 py-3">Phone</th><th class="px-4 py-3">Treatment</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Notes</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="px-4 py-10 text-center text-keva-muted">No appointments for this date.</td></tr>'}</tbody></table></div>
+  <section class="mt-5 overflow-hidden rounded-2xl border border-keva-line bg-white shadow-sm">
+    <div class="grid grid-cols-[58px_1fr] border-b border-keva-line bg-white sm:grid-cols-[72px_1fr]">
+      <div class="border-r border-keva-line"></div>
+      <div class="flex items-end gap-4 px-4 py-3">
+        <div class="text-center"><div class="text-[11px] font-semibold text-keva-muted">${escapeHtml(headerDate.weekday)}</div><div class="text-2xl font-normal leading-none text-keva-ink">${escapeHtml(headerDate.day)}</div></div>
+        <div><h2 class="text-lg font-semibold sm:text-xl">${escapeHtml(headerDate.title)}</h2><p class="text-sm text-keva-muted">${appointments.length} appointment${appointments.length === 1 ? '' : 's'} · up to 4 bookings per time slot</p></div>
+      </div>
+    </div>
+    <div class="max-h-[72vh] overflow-y-auto">
+      ${scheduleRows}
+    </div>
   </section>
-</main></body></html>`;
+</main>
+
+<div id="appointment-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/35 p-4" onclick="if(event.target.id==='appointment-modal') closeAppointment()">
+  <div class="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl ring-1 ring-keva-line">
+    <div class="flex items-start justify-between gap-4"><div><p class="text-xs font-semibold uppercase tracking-[.18em] text-keva-muted">Appointment</p><h3 id="modal-treatment" class="mt-1 text-xl font-bold text-keva-ink"></h3></div><button class="rounded-full p-2 text-keva-muted hover:bg-keva-soft" onclick="closeAppointment()" aria-label="Close">✕</button></div>
+    <dl class="mt-5 grid gap-3 text-sm">
+      <div class="flex justify-between gap-4 border-b border-keva-line pb-2"><dt class="text-keva-muted">Time</dt><dd id="modal-time" class="font-semibold text-keva-ink"></dd></div>
+      <div class="flex justify-between gap-4 border-b border-keva-line pb-2"><dt class="text-keva-muted">Patient</dt><dd id="modal-patient" class="font-semibold text-keva-ink"></dd></div>
+      <div class="flex justify-between gap-4 border-b border-keva-line pb-2"><dt class="text-keva-muted">Phone</dt><dd id="modal-phone" class="font-semibold text-keva-ink"></dd></div>
+      <div class="flex justify-between gap-4 border-b border-keva-line pb-2"><dt class="text-keva-muted">Status</dt><dd id="modal-status" class="font-semibold text-keva-ink"></dd></div>
+      <div class="flex justify-between gap-4 border-b border-keva-line pb-2"><dt class="text-keva-muted">Source</dt><dd id="modal-source" class="font-semibold text-keva-ink"></dd></div>
+      <div><dt class="text-keva-muted">Notes</dt><dd id="modal-notes" class="mt-1 rounded-xl bg-keva-soft p-3 text-keva-ink"></dd></div>
+    </dl>
+  </div>
+</div>
+<script>
+function openAppointment(el){
+  const modal=document.getElementById('appointment-modal');
+  document.getElementById('modal-treatment').textContent=el.dataset.treatment||'Appointment';
+  document.getElementById('modal-time').textContent=el.dataset.time||'—';
+  document.getElementById('modal-patient').textContent=el.dataset.patient||'—';
+  document.getElementById('modal-phone').textContent=el.dataset.phone||'—';
+  document.getElementById('modal-status').textContent=el.dataset.status||'—';
+  document.getElementById('modal-source').textContent=el.dataset.source||'—';
+  document.getElementById('modal-notes').textContent=el.dataset.notes||'—';
+  modal.classList.remove('hidden'); modal.classList.add('flex');
+}
+function closeAppointment(){
+  const modal=document.getElementById('appointment-modal');
+  modal.classList.add('hidden'); modal.classList.remove('flex');
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeAppointment()});
+</script>
+</body></html>`;
 
   return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
 }
