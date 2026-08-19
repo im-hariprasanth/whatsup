@@ -21,12 +21,18 @@ function formatTreatments(treatments) {
   if (!Array.isArray(treatments) || treatments.length === 0) return null;
 
   const lines = treatments.map((t) => {
+    const price = t.price ? `: ${t.price}` : '';
     const duration = t.durationMinutes ? ` (${t.durationMinutes} min)` : '';
     const desc = t.description ? ` — ${t.description}` : '';
-    return `- ${t.name}: ${t.price}${duration}${desc}`;
+    return `- ${t.name}${price}${duration}${desc}`;
   });
 
-  return `Treatments offered:\n${lines.join('\n')}`;
+  const hasUnpricedTreatment = treatments.some((t) => !t.price);
+  const priceNote = hasUnpricedTreatment
+    ? '\nFor any treatment listed above without a price, don\'t guess a number — tell the patient the clinic will confirm pricing.'
+    : '';
+
+  return `Treatments offered:\n${lines.join('\n')}${priceNote}`;
 }
 
 // Renders what's already known about this specific patient from the CRM, so

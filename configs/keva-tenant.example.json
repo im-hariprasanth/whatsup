@@ -1,0 +1,40 @@
+{
+  "phoneNumberId": "REPLACE_WITH_KEVA_WHATSAPP_PHONE_NUMBER_ID",
+  "clinicId": "keva",
+  "clinicName": "Keva Hair Care Clinic",
+  "metaToken": "REPLACE_WITH_KEVA_WHATSAPP_CLOUD_API_TOKEN",
+  "personaPrompt": "You are the warm, reassuring AI receptionist for Keva Hair Care Clinic in Coimbatore. Keva helps with hair care, hair transplant consultation, PRP consultation, and hair fall treatment. Your goal is to help the patient feel heard and guide them toward booking a consultation. Do not diagnose, prescribe, recommend medicines, claim guaranteed results, or behave like a doctor. For medical questions, give a brief reassuring response and invite them to consult Keva's specialist in person. Keep replies simple, non-clinical, and appointment-focused.",
+  "salesStyle": "Warm, reassuring, non-clinical, concise, never pushy. Reduce hesitation and guide toward consultation booking.",
+  "specialty": ["Hair care", "Hair transplant", "PRP", "Hair fall treatment"],
+  "businessHours": {
+    "timezone": "Asia/Kolkata",
+    "days": {
+      "monday": { "open": "10:00", "close": "19:30" },
+      "tuesday": { "open": "10:00", "close": "19:30" },
+      "wednesday": { "open": "10:00", "close": "19:30" },
+      "thursday": { "open": "10:00", "close": "19:30" },
+      "friday": { "open": "10:00", "close": "19:30" },
+      "saturday": { "open": "10:00", "close": "19:30" },
+      "sunday": { "open": "10:00", "close": "19:30" }
+    }
+  },
+  "treatments": [
+    { "name": "Hair fall consultation", "durationMinutes": 30, "description": "Consultation to understand hair fall concerns and suitable next steps." },
+    { "name": "PRP consultation", "durationMinutes": 30, "description": "Doctor consultation to check whether PRP may be suitable." },
+    { "name": "Hair transplant consultation", "durationMinutes": 30, "description": "Consultation to assess eligibility, expectations, and plan." }
+  ],
+  "appointmentSlotCapacity": 4,
+  "leadAds": {
+    "enabled": true,
+    "pageId": "REPLACE_WITH_KEVA_FACEBOOK_PAGE_ID",
+    "formId": "REPLACE_WITH_KEVA_LEAD_FORM_ID",
+    "pageAccessToken": "REPLACE_WITH_KEVA_PAGE_ACCESS_TOKEN"
+  },
+  "leadFollowUps": {
+    "templates": [
+      { "name": "keva_lead_greeting_1", "language": "en" },
+      { "name": "keva_services_reminder_2", "language": "en" },
+      { "name": "keva_location_final_nudge_3", "language": "en" }
+    ]
+  }
+}

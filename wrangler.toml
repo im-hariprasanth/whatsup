@@ -14,6 +14,9 @@ d1_databases = [
   { binding = "CRM_DB", database_name = "clinic-receptionist-crm", database_id = "b8c18990-1d9a-4a55-bddf-1dd1b06d9d9c" }
 ]
 
+[triggers]
+crons = ["*/15 * * * *"]
+
 # Secrets (GROQ_API_KEY, VERIFY_TOKEN) are NOT set here.
 # Locally: put them in .dev.vars (see .dev.vars.example).
 # In production: `wrangler secret put GROQ_API_KEY` / `wrangler secret put VERIFY_TOKEN`.

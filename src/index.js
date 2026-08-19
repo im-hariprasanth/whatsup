@@ -1,5 +1,8 @@
 import { handleMessage } from './handleMessage.js';
-import { handleOAuthStart, handleOAuthCallback } from './handleOAuth.js';
+import { handleLeadAds, processDueFollowUps } from './handleLeadAds.js';
+import { handleDashboard } from './handleDashboard.js';
+import { handleCalendar } from './handleCalendar.js';
+import { handleLogin, handleLogout, requireAuth } from './lib/auth.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -8,11 +11,23 @@ export default {
     // Narrow, path-specific routes checked first; everything else falls
     // through to the method-only Meta webhook handling at "/" below
     // (unchanged -- still what's registered in Meta's dashboard).
-    if (request.method === 'GET' && url.pathname === '/oauth/google/start') {
-      return handleOAuthStart(request, env);
+    if ((request.method === 'GET' || request.method === 'POST') && url.pathname === '/login') {
+      return handleLogin(request, env);
     }
-    if (request.method === 'GET' && url.pathname === '/oauth/google/callback') {
-      return handleOAuthCallback(request, env);
+    if (request.method === 'GET' && url.pathname === '/logout') {
+      return handleLogout(request);
+    }
+    if (request.method === 'GET' && url.pathname === '/dashboard') {
+      return handleDashboard(request, env);
+    }
+    if (request.method === 'GET' && url.pathname === '/calendar') {
+      return handleCalendar(request, env);
+    }
+    if ((request.method === 'GET' || request.method === 'POST') && url.pathname === '/tasks/followups/run') {
+      const authResponse = await requireAuth(request, env);
+      if (authResponse) return authResponse;
+      ctx.waitUntil(processDueFollowUps(env));
+      return new Response('Queued', { status: 202 });
     }
 
     if (request.method === 'GET') {
@@ -24,6 +39,9 @@ export default {
       if (mode === 'subscribe' && token === env.VERIFY_TOKEN) {
         return new Response(challenge, { status: 200 });
       }
+      if (!mode && url.pathname === '/') {
+        return Response.redirect(`${url.origin}/dashboard?clinicId=bonitaa`, 302);
+      }
       return new Response('Forbidden', { status: 403 });
     }
 
@@ -33,8 +51,11 @@ export default {
       // Ack immediately — Meta expects a fast 200. The actual Groq call,
       // WhatsApp send, and KV/D1 writes happen after the response is sent.
       ctx.waitUntil(
-        handleMessage(payload, env).catch((err) => {
-          console.error('handleMessage failed:', err);
+        (async () => {
+          const handledLeadAd = await handleLeadAds(payload, env);
+          if (!handledLeadAd) await handleMessage(payload, env);
+        })().catch((err) => {
+          console.error('webhook handling failed:', err);
         })
       );
 
@@ -42,5 +63,9 @@ export default {
     }
 
     return new Response('Not found', { status: 404 });
+  },
+
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(processDueFollowUps(env));
   }
 };

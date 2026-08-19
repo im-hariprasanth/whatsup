@@ -2,36 +2,15 @@ import { getTenant } from './lib/tenant.js';
 import { getHistory, saveHistory } from './lib/history.js';
 import { generateReply } from './lib/groq.js';
 import { sendReply } from './lib/whatsapp.js';
-import { saveToCRM, getClient } from './lib/crm.js';
+import { saveToCRM } from './lib/crm.js';
+import { markLeadReplied } from './lib/leads.js';
 import { claimMessage } from './lib/idempotency.js';
-import { resolveBooking, resolveProposedSlot } from './lib/booking.js';
+import { resolveAvailability, resolveBooking } from './lib/booking.js';
 import { resolveStatusCheck } from './lib/statusCheck.js';
-import { getPendingSlot, savePendingSlot, clearPendingSlot } from './lib/pendingSlot.js';
 import { buildSystemPrompt } from './prompts/buildSystemPrompt.js';
-
-// A clinic wants a real name on every booking, so once resolveBooking asks
-// for one, the entire next message is treated as the answer rather than
-// running it through Groq — a name is too low-stakes to need an LLM call,
-// and doing it deterministically means it can never get tangled up with the
-// booking logic the way a model-driven turn could.
-function extractNameFromReply(text) {
-  return text.replace(/^(it'?s|my name is|i am|i'?m|this is)\s+/i, '').trim();
-}
-
-// Whether a booking actually gets confirmed relied entirely on the model
-// correctly judging, fresh each turn, "is this reply answering the slot I
-// just proposed?" Verified live in the same conversation that this misfires
-// often enough to matter — it recognized a plain "Yes" as a confirmation
-// twice and, on an identical "Yes!" one turn earlier, just re-asked the same
-// question instead. A short, unambiguous affirmative immediately following a
-// slot proposal has only one reasonable reading, so that common case is
-// decided here deterministically instead of leaving it to the model's
-// per-turn judgment call every single time.
-const BARE_AFFIRMATIVE = /^(ye+s+|yea+h?|yep+|yup+|sure|ok(ay)?|confirm(ed)?|book\s*it|go\s*ahead|please\s*book(\s*it)?)[.!]*$/i;
-
-function isBareAffirmative(text) {
-  return BARE_AFFIRMATIVE.test(text.trim());
-}
+import { validateModelOutput } from './lib/validateModelOutput.js';
+import { applyMedicalSafety } from './lib/medicalSafety.js';
+import { saveConversationState } from './lib/conversationState.js';
 
 // Orchestrates one inbound WhatsApp message end to end:
 // tenant lookup -> rolling history -> Groq -> WhatsApp reply -> history write -> CRM upsert.
@@ -63,63 +42,22 @@ export async function handleMessage(payload, env) {
   }
 
   const patientPhone = message.from;
+  await markLeadReplied({ clinicId: tenant.clinicId, phone: patientPhone, env });
   const historyKey = `${tenant.clinicId}:${patientPhone}`;
-  const pendingSlot = await getPendingSlot(tenant.clinicId, patientPhone, env);
-
-  // We already asked for their name to finish a pending booking — this
-  // message is the answer. Skip Groq entirely: complete the booking with
-  // the slot the code already verified, deterministically, end to end.
-  if (pendingSlot?.awaitingName) {
-    const history = await getHistory(historyKey, env);
-    const name = extractNameFromReply(message.text.body);
-    await saveToCRM(tenant.clinicId, patientPhone, { name }, env);
-
-    const bookingResult = await resolveBooking({
-      tenant, bookingRequest: pendingSlot, patientPhone, env, skipNameCheck: true
-    });
-    const finalReply = bookingResult.replyOverride || `Thanks, ${name}!`;
-
-    try {
-      await sendReply({ ...tenant, phoneNumberId }, patientPhone, finalReply);
-    } catch (err) {
-      console.error(`[whatsapp:error] ${historyKey}`, err);
-    }
-
-    await saveHistory(historyKey, [
-      ...history,
-      { role: 'user', content: message.text.body },
-      { role: 'assistant', content: finalReply }
-    ], env);
-
-    if (bookingResult.crmSlot) {
-      await saveToCRM(tenant.clinicId, patientPhone, { appointment_slot: bookingResult.crmSlot }, env);
-    }
-    await clearPendingSlot(tenant.clinicId, patientPhone, env);
-    return;
-  }
-
   const history = await getHistory(historyKey, env);
-  const existingClient = await getClient(tenant.clinicId, patientPhone, env);
 
   const messages = [
-    { role: 'system', content: buildSystemPrompt(tenant, existingClient, pendingSlot) },
+    { role: 'system', content: buildSystemPrompt(tenant) },
     ...history,
     { role: 'user', content: message.text.body }
   ];
 
   console.log(`[groq:request] ${historyKey}`, JSON.stringify(messages));
 
-  const { reply, extract, proposedSlot, confirmBooking: modelConfirmBooking, statusCheck } = await generateReply(messages, env);
+  const rawModelOutput = await generateReply(messages, env);
+  const { reply, extract, bookingRequest, availabilityCheck, statusCheck } = validateModelOutput(rawModelOutput, tenant);
 
   console.log(`[groq:response] ${historyKey} reply=${reply} extract=${JSON.stringify(extract)}`);
-
-  // Deterministic override: a bare "yes"/"confirm" right after a slot was
-  // proposed is unambiguous regardless of what the model decided this turn.
-  const hasActionablePending = pendingSlot && !pendingSlot.declined && !pendingSlot.awaitingName;
-  const confirmBooking = modelConfirmBooking || (hasActionablePending && isBareAffirmative(message.text.body));
-  if (!modelConfirmBooking && confirmBooking) {
-    console.log(`[booking:affirmative-override] ${historyKey}`);
-  }
 
   // finalReply starts as the AI's own reply (which already assumed success);
   // resolveBooking/resolveStatusCheck only override it when reality disagrees
@@ -129,56 +67,38 @@ export async function handleMessage(payload, env) {
   let finalReply = reply;
   let bookingResult = { confirmed: false, crmSlot: null };
 
-  if (proposedSlot) {
-    // The model is offering a slot for the first time this turn — verify it
-    // and remember it, so the actual confirmation later never has to trust
-    // the model to recall its own offer (see resolveProposedSlot's comment).
-    console.log(`[booking:proposed] ${historyKey}`, JSON.stringify(proposedSlot));
-    const proposal = resolveProposedSlot({ tenant, proposedSlot });
-    finalReply = proposal.replyOverride;
-    if (proposal.valid) {
-      await savePendingSlot(tenant.clinicId, patientPhone, { ...proposal.slot, awaitingName: false }, env);
-    }
-  } else if (confirmBooking && pendingSlot && !pendingSlot.declined) {
-    // Only ever book the code-verified pending slot, never a value the model
-    // supplied itself — confirm_booking is a plain boolean precisely so the
-    // model is never asked to produce a date/time it might not actually have.
-    console.log(`[booking:confirm] ${historyKey}`, JSON.stringify(pendingSlot));
-    bookingResult = await resolveBooking({ tenant, bookingRequest: pendingSlot, patientPhone, env });
-    if (bookingResult.needsName) {
-      await savePendingSlot(tenant.clinicId, patientPhone, { ...pendingSlot, awaitingName: true }, env);
-    } else if (bookingResult.confirmed) {
-      await clearPendingSlot(tenant.clinicId, patientPhone, env);
-    } else {
-      // Declined (out of hours / a real calendar conflict) — the day is
-      // still what's being discussed, only that specific time didn't work.
-      // Keep the date as a hint instead of erasing it outright: verified
-      // live that once the pending slot was fully cleared, a bare follow-up
-      // time ("3pm?") with no day gave the model nothing to anchor to and it
-      // silently defaulted to booking *today* instead of the day already
-      // established — a wrong booking with no error, the worst kind.
-      await savePendingSlot(
-        tenant.clinicId, patientPhone,
-        { date: pendingSlot.date, treatment: pendingSlot.treatment, awaitingName: false, declined: true },
-        env
-      );
-    }
+  if (bookingRequest) {
+    console.log(`[booking:request] ${historyKey}`, JSON.stringify(bookingRequest));
+    bookingResult = await resolveBooking({ tenant, bookingRequest, patientPhone, patientName: extract?.name || null, env });
     if (bookingResult.replyOverride) {
       finalReply = bookingResult.replyOverride;
     }
-  } else if (confirmBooking) {
-    // The model signaled a confirmation but no slot was ever actually
-    // proposed/verified for this patient — verified live that without this
-    // guard the model will fabricate a date/time to fill the gap rather than
-    // admit it doesn't have one. Recover by asking for specifics instead of
-    // trusting anything it invents.
-    console.log(`[booking:confirm-no-pending] ${historyKey}`);
-    finalReply = `Happy to get that booked — what day and time would you like to come in?`;
+  } else if (availabilityCheck) {
+    console.log(`[availability:check] ${historyKey}`, JSON.stringify(availabilityCheck));
+    const availabilityResult = await resolveAvailability({ tenant, availabilityCheck, env });
+    finalReply = availabilityResult.replyOverride;
+    await saveConversationState({
+      clinicId: tenant.clinicId,
+      patientPhone,
+      state: { stage: 'availability_checked', lastOfferedSlot: availabilityCheck },
+      env
+    });
   } else if (statusCheck) {
     console.log(`[status:check] ${historyKey}`);
     const statusResult = await resolveStatusCheck({ tenant, patientPhone, env });
     finalReply = statusResult.replyOverride;
   }
+
+  if (bookingResult.confirmed) {
+    await saveConversationState({
+      clinicId: tenant.clinicId,
+      patientPhone,
+      state: { stage: 'booked', lastBookedSlot: bookingRequest },
+      env
+    });
+  }
+
+  finalReply = applyMedicalSafety({ userText: message.text.body, reply: finalReply });
 
   // Send the reply. A WhatsApp send failure (e.g. an invalid/placeholder token
   // in local dev) shouldn't stop history/CRM writes, so it's logged, not thrown.
@@ -205,12 +125,6 @@ export async function handleMessage(payload, env) {
   // signal for logging/future logic, not a gate on CRM visibility.
   if (extract || bookingResult.crmSlot) {
     const finalExtract = { ...(extract || {}) };
-    // appointment_slot is only ever set from the deterministic booking flow
-    // below, never from the model's own free-text extraction — verified live
-    // that the model can independently invent a slot value here (unrelated
-    // to any real booking) that then overwrites the real one via saveToCRM's
-    // upsert.
-    delete finalExtract.appointment_slot;
     if (bookingResult.crmSlot) {
       finalExtract.appointment_slot = bookingResult.crmSlot;
     }

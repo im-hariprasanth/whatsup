@@ -54,10 +54,7 @@ function parseArgs(argv) {
 }
 
 // Fetches the tenant's current KV value so onboarding can merge on top of it
-// rather than blindly overwriting -- critical once a tenant has a
-// googleCalendar connection (written exclusively by the OAuth callback,
-// never by this script), since a routine re-run to tweak pricing must not
-// silently wipe that connection. Returns {} for a brand new tenant.
+// rather than blindly overwriting. Returns {} for a brand new tenant.
 function fetchExistingTenant(phoneNumberId, local) {
   const scopeFlag = local ? '--local' : '';
   const command = `npx wrangler kv key get --binding=TENANTS "${phoneNumberId}" ${scopeFlag}`.trim();
@@ -121,9 +118,12 @@ function main() {
       process.exit(1);
     }
     config.treatments.forEach((t, i) => {
-      if (!t.name || !t.price) {
-        console.error(`treatments[${i}] needs at least "name" and "price".`);
+      if (!t.name) {
+        console.error(`treatments[${i}] needs at least "name".`);
         process.exit(1);
+      }
+      if (!t.price) {
+        console.warn(`treatments[${i}] ("${t.name}") has no price — the bot will tell patients pricing will be confirmed by the clinic instead of stating a number.`);
       }
       if (!t.durationMinutes) {
         console.warn(`treatments[${i}] ("${t.name}") has no durationMinutes — booking will fall back to a default duration.`);
@@ -132,9 +132,7 @@ function main() {
   }
 
   if (config.googleCalendar !== undefined) {
-    console.warn(
-      '`googleCalendar` is managed exclusively by the OAuth callback route (/oauth/google/start) — ignoring the value in your input.'
-    );
+    console.warn('`googleCalendar` is no longer used — ignoring the value in your input.');
     delete config.googleCalendar;
   }
 
@@ -142,11 +140,12 @@ function main() {
 
   const existing = fetchExistingTenant(phoneNumberId, args.local);
   if (existing.googleCalendar) {
-    console.log('Preserving existing googleCalendar connection for this tenant.');
+    console.log('Removing legacy googleCalendar connection from this tenant config.');
+    delete existing.googleCalendar;
   }
 
   // Shallow merge: incoming fields win per top-level key, but anything not
-  // mentioned in this run (like googleCalendar) survives untouched.
+  // mentioned in this run survives untouched.
   const tenantValue = { ...existing, ...incomingValue };
 
   // Written to a temp file and passed via --path rather than inlined on the
