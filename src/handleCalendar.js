@@ -53,9 +53,10 @@ export async function handleCalendar(request, env) {
   }
   const scheduleRows = [...visibleHours].sort((a, b) => a - b).map((hour) => {
     const hourAppointments = appointments.filter((appt) => Number(String(appt.time || '').split(':')[0]) === hour);
-    const cards = hourAppointments.map((appt) => {
+    const cards = hourAppointments.map((appt, index) => {
       const minutes = Number(String(appt.time || '').split(':')[1] || 0);
-      return `<button type="button" onclick="openAppointment(this)" style="margin-top:${Math.min(minutes, 45)}px" class="min-w-[150px] flex-1 rounded-lg bg-[#039be5] px-3 py-2 text-left text-xs font-semibold text-white shadow-sm transition hover:bg-[#0288d1] sm:min-w-[190px]"
+      const overCapacity = index >= 4;
+      return `<button type="button" onclick="openAppointment(this)" style="margin-top:${Math.min(minutes, 45)}px" class="min-w-[165px] flex-1 rounded-xl border ${overCapacity ? 'border-red-200 bg-red-50' : 'border-keva-line bg-keva-soft'} px-3 py-2.5 text-left text-xs shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:min-w-[205px]"
         data-time="${escapeHtml(appointmentTime(appt.time))}"
         data-patient="${escapeHtml(appt.patient_name || '—')}"
         data-phone="${escapeHtml(appt.patient_phone)}"
@@ -63,14 +64,20 @@ export async function handleCalendar(request, env) {
         data-status="${escapeHtml(appt.status)}"
         data-notes="${escapeHtml(appt.notes || '—')}"
         data-source="${escapeHtml(appt.source || '—')}">
-        <span class="block truncate">${escapeHtml(appt.treatment || 'Appointment')} — ${escapeHtml(appt.patient_name || appt.patient_phone || 'Patient')}</span>
-        <span class="mt-0.5 block font-medium opacity-90">${escapeHtml(appointmentTime(appt.time))}</span>
+        <span class="flex items-start gap-2">
+          <span class="mt-0.5 h-8 w-1.5 shrink-0 rounded-full ${overCapacity ? 'bg-red-500' : 'bg-keva-brand'}"></span>
+          <span class="min-w-0 flex-1">
+            <span class="block truncate font-bold text-keva-ink">${escapeHtml(appt.patient_name || appt.patient_phone || 'Patient')}</span>
+            <span class="mt-0.5 block truncate font-medium text-keva-muted">${escapeHtml(appt.treatment || 'Appointment')}</span>
+            <span class="mt-2 inline-flex rounded-full ${overCapacity ? 'bg-red-100 text-red-700' : 'bg-white text-keva-brand'} px-2 py-0.5 text-[11px] font-bold ring-1 ${overCapacity ? 'ring-red-200' : 'ring-keva-line'}">${escapeHtml(appointmentTime(appt.time))}${overCapacity ? ' · over capacity' : ''}</span>
+          </span>
+        </span>
       </button>`;
     }).join('');
     return `<div class="grid grid-cols-[58px_1fr] sm:grid-cols-[72px_1fr]">
       <div class="border-r border-keva-line pr-2 pt-2 text-right text-xs text-keva-muted">${escapeHtml(hourLabel(hour))}</div>
-      <div class="min-h-[78px] border-b border-keva-line px-2 py-1.5 sm:px-3">
-        <div class="flex items-start gap-2 overflow-x-auto">${cards}</div>
+      <div class="min-h-[88px] border-b border-keva-line px-2 py-2 sm:px-3">
+        <div class="flex items-start gap-2 overflow-x-auto pb-1">${cards}</div>
       </div>
     </div>`;
   }).join('');
